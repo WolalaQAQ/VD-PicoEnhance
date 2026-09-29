@@ -1,0 +1,11 @@
+# Normalize to LF in the repository and on every checkout. Several files are
+# consumed on-device (Magisk shell scripts) or by Make/CMake and must not carry
+# CRLF.
+* text=auto eol=lf
+
+# Explicitly binary (should not normally be committed; covered by .gitignore).
+*.bin binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.zip binary

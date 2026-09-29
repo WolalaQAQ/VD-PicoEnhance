@@ -1,0 +1,45 @@
+# VD-PicoEnhance
+#
+# The repository ships source only. Build outputs, device pulls and third-party
+# binaries stay untracked.
+
+# Build outputs
+mod/native/build-arm64/
+mod/src/**/bin/
+mod/src/**/obj/
+zygisk/jni/build-arm64/
+zygisk/dist/
+zygisk/payload/libvdhs.so
+zygisk/payload/VdHsMod.dll
+zygisk/payload/0Harmony.dll
+zygisk/payload/Xenko.OpenXR.patched.dll
+zygisk/zygisk/
+
+# Generated device data / config pushed at runtime (never commit)
+*.apk
+*.aab
+*.so
+*.dll
+*.bin
+# ...except the hand mesh blob that Releases ship (see assets/mesh/README.md)
+!assets/mesh/hand_mesh_fb.bin
+*.dex
+*.idsig
+*.keystore
+*.log
+logcat*.txt
+
+# Local toolchain paths (build.ps1 reads tools/sdk-path.txt as a fallback)
+tools/sdk-path.txt
+tools/jdk-path.txt
+
+# Python helpers
+__pycache__/
+*.py[cod]
+
+# Editor / OS
+.vs/
+.vscode/
+*.swp
+Thumbs.db
+desktop.ini

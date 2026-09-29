@@ -1,0 +1,9 @@
+# Payload mode, read by the native payload at runtime (overrides VDHS_MODE).
+#   1 = Layer-1 smoke test: inject + reach Mono, but do NOT load VdHsMod.dll.
+#   2 = full: load VdHsMod.dll and invoke Loader.Start().
+#
+# Shipped default is 1 on purpose: the very first boot after installing this
+# module should only prove injection, never touch the managed runtime yet.
+# Per the handoff doc (docs/HAND-VD-ZYGISK-2026-09-28.md §8): run V2 with 1,
+# then change this to 2 and reboot for V3 (managed load) and everything after.
+1

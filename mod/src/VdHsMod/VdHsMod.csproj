@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    VdHsMod - VD hand/controller hot-switch mod, loader-agnostic.
+
+    Hard rule (design §3.1): ZERO compile-time reference to any VD / Xenko /
+    Mono.Android assembly. Everything the mod touches is reached by name
+    through reflection. The only optional dependency is HarmonyLib, and it is
+    opt-in (see VdHsHarmony below) so the default build restores from nothing
+    and compiles offline.
+
+    Target framework: netstandard2.0 - the safest IL surface for the app's
+    Mono 9.0.1626.22923 (arm64) runtime. Do not raise this without a device
+    test; a netX.0 assembly risks pulling System.Runtime 9.x identity that the
+    app's Mono profile may not resolve.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>VdHsMod</AssemblyName>
+    <RootNamespace>VdHsMod</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <DebugType>none</DebugType>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Version>0.1.0</Version>
+    <Product>VdHsMod</Product>
+    <Description>VD hand/controller hot-switch mod (Track Z / Track R shared payload)</Description>
+    <!-- Never copy a netstandard shim next to the assembly; the app supplies the facade. -->
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+  </PropertyGroup>
+
+  <!--
+    Opt-in Harmony backend.
+      dotnet build -p:VdHsHarmony=true
+    Requires NuGet (Lib.Harmony). The default build is the offline-safe
+    redirect/data-only backend. See docs/HAND-VD-ZYGISK-2026-09-28.md §决策点.
+  -->
+  <PropertyGroup Condition="'$(VdHsHarmony)' == 'true'">
+    <DefineConstants>$(DefineConstants);VDHS_HARMONY</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(VdHsHarmony)' == 'true'">
+    <PackageReference Include="Lib.Harmony" Version="2.3.5" />
+  </ItemGroup>
+
+</Project>

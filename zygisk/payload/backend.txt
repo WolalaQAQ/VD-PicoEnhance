@@ -1,0 +1,12 @@
+# VdHsMod backend selection (read by VdHsMod.PayloadConfig at runtime).
+#
+#   auto      (default) redirect if Xenko.OpenXR.patched.dll is staged,
+#             else harmony if compiled in and 0Harmony.dll is staged,
+#             else dataonly.
+#   redirect  preload Xenko.OpenXR.patched.dll.
+#   harmony   HarmonyLib runtime IL patches (build VdHsMod with -p:VdHsHarmony=true).
+#   dataonly  reflection data injection only (diagnostic; no IsControllerActive switch).
+#   none      injection smoke test only.
+#
+# The environment variable VDHS_BACKEND overrides this file.
+auto

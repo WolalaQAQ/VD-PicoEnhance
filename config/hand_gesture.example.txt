@@ -1,0 +1,73 @@
+# VD-PicoEnhance example configuration: hand_gesture.txt
+#
+# ---------------------------------------------------------------------------
+# WHERE TO PUT IT
+#   On the headset, after the module has run at least once:
+#       /data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt
+#   (That directory is created by the module. Use root / `adb push` + `su`.)
+#   Restart Virtual Desktop (or reboot) to apply.
+#
+#   Every key is optional. Missing keys keep their built-in default, so you can
+#   ship a two-line file.
+#
+# This file is an EXAMPLE, not the shipped runtime default. Copy the lines you
+# need, do not copy it verbatim unless you want all of these behaviours.
+# ---------------------------------------------------------------------------
+
+# --- Hand passthrough -------------------------------------------------------
+# Write a see-through hole into VD's own VR projection image where each hand is.
+# 0/absent = off; 1 = on. This is the SteamVR hand-passthrough feature.
+pt_hole = 1
+
+# Follow VD's own "VR passthrough hands" setting instead of always drawing.
+# 1 = only draw when VD itself would show hand passthrough (recommended).
+pt_follow_settings = 1
+
+# Restore the background passthrough layer state after a hand hole is drawn.
+pt_bg_fix = 1
+
+# Split the two hands into two separate projected layers (PICO keeps one
+# geometry per layer). Set 1 if one hand's hole covers the other.
+# pt_split = 1
+
+# Hole shape / placement tuning (rarely needed):
+# pt_disc_r     = 0.1     # disc radius, metres
+# pt_margin_px  = 0       # extra pixels around the disc
+# pt_flip_y     = 0       # flip the disc's vertical axis
+# pt_style      = 1       # draw style variant
+# pt_max_age_ms = 100     # discard hand data older than this
+# pt_alpha_only = 0       # debug: only OR the alpha flags, draw no hole
+
+# --- Hand joint freeze gate -------------------------------------------------
+# PICO occasionally freezes hand joints (the hand "flashes" and disappears).
+# When a joint has not moved for this many ms, report that hand as inactive.
+# 0 = disabled.
+hj_freeze_ms = 300
+
+# --- Eye gaze ---------------------------------------------------------------
+# One-Euro smoothing + jump confirmation, and the VD-on-PICO head-pose fix.
+# 1 = pre-compensate the head pose VD drops when composing the PICO gaze
+#     (recommended on PICO).
+gaze_vd_fix = 1
+# gaze_filter   = 1
+# gaze_beta     = 0.01    # One-Euro beta
+# gaze_mincutoff = 1.0    # One-Euro minimum cutoff (Hz)
+# gaze_jump_deg = 8       # treat a jump larger than this as a new fixation
+# gaze_hold_ms  = 120     # hold time before accepting a jump
+# gaze_log      = 0       # verbose gaze logging (debug)
+
+# --- Synthesised aim / pinch / menu (XR_FB_hand_tracking_aim) ---------------
+# When the PICO runtime does not supply an aim state, the layer synthesises
+# pinch, a shoulder->index-proximal pointing ray, and a palm-toward-headset
+# menu gesture.
+# aim_runtime  = 1        # prefer the runtime's own aim when it is valid
+# aim_shoulder = 1        # shoulder->proximal ray (vs index direction)
+# aim_smooth   = 0.2      # ray smoothing
+# aim_update   = 1        # update the aim each frame
+# aim_pitch_deg = 0       # pitch offset
+# pinch_on_cm   = 2.0     # pinch begins below this tip distance (metres*100)
+# pinch_off_cm  = 3.0     # pinch releases above this
+# pinch_full_cm = 0.5     # fully-pressed distance
+# menu_pinch    = 1       # palm-toward-headset = menu
+# menu_hold_ms  = 500     # hold time for the menu gesture
+# menu_cooldown_ms = 300  # cooldown between menu presses

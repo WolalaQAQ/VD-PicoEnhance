@@ -1,0 +1,7 @@
+jni/build-arm64/
+dist/
+payload/libvdhs.so
+payload/VdHsMod.dll
+payload/0Harmony.dll
+payload/Xenko.OpenXR.patched.dll
+zygisk/arm64-v8a.so

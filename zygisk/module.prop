@@ -1,0 +1,6 @@
+id=vdhs_zygisk
+name=VD Handswitch (Zygisk)
+version=0.1.0
+versionCode=1
+author=VD-PicoEnhance contributors
+description=Runtime hand/controller hot-switch for the untouched official Virtual Desktop (VirtualDesktop.Android). Experimental; needs root + Zygisk. Does not modify the APK.
