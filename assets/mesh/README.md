@@ -39,14 +39,24 @@ Releases publish the same blob and list this hash in `SHA256SUMS.txt`.
 
 ## How to use it
 
-On the headset, with root:
+The blob must sit next to the staged `libvdhs.so`, in the app's private
+directory:
 
 ```
 /data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin
 ```
 
-(i.e. next to the staged `libvdhs.so`). Restart Virtual Desktop afterwards. If
-the file is absent, everything else still works; only the hand mesh is disabled.
+With rooted adb on the PC:
+
+```sh
+adb push hand_mesh_fb.bin /data/local/tmp/
+adb shell su -c 'd=/data/data/VirtualDesktop.Android; mkdir -p $d/vdhs'
+adb shell su -c 'cp /data/local/tmp/hand_mesh_fb.bin /data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin'
+adb shell su -c 'd=/data/data/VirtualDesktop.Android; chown $(stat -c %u:%g $d) $d/vdhs/hand_mesh_fb.bin; chmod 0644 $d/vdhs/hand_mesh_fb.bin'
+```
+
+Restart Virtual Desktop afterwards. If the file is absent, everything else
+still works; only the hand mesh is disabled.
 
 ## Disclaimer
 

@@ -72,8 +72,11 @@ The native payload must build with zero warnings; the default managed build rest
 ## Installation
 
 1. In Magisk choose **Modules → Install from storage**, select `vdhs_zygisk.zip`, then reboot the headset.
-2. The shipped `payload/mode.txt` is `1`: an injection smoke test that does not load the managed layer. After confirming the module works, change `/data/adb/modules/vdhs_zygisk/payload/mode.txt` to `2` and restart Virtual Desktop to enable the full compatibility layer.
-3. To update only the payload later, a reboot is not needed: push `libvdhs.so` to `/data/adb/modules/vdhs_zygisk/payload/` and restart Virtual Desktop.
+2. After the reboot the full compatibility layer is active; start Virtual Desktop and hand tracking, passthrough and the eye-gaze fix are available.
+
+`payload/mode.txt` defaults to `2`, the full layer. For a control run that only injects and does not load the managed layer, change `/data/adb/modules/vdhs_zygisk/payload/mode.txt` to `1` and restart Virtual Desktop.
+
+To update only the payload later, a reboot is not needed: push `libvdhs.so` to `/data/adb/modules/vdhs_zygisk/payload/` and restart Virtual Desktop.
 
 > PICO blocks a Virtual Desktop cold start while it is in gesture mode. Pick up the controller, wait until `getprop sys.pxr.trackingservice.gesturemode` returns `0`, then start Virtual Desktop.
 
@@ -83,17 +86,33 @@ Copy [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) to `/d
 
 ### Hand mesh
 
-`XR_FB_hand_tracking_mesh` needs `hand_mesh_fb.bin` next to the payload. Without it, that extension is simply not advertised and everything else still works.
+`XR_FB_hand_tracking_mesh` needs `hand_mesh_fb.bin` next to the payload, in the app's private directory:
 
-- **Use the blob from a release**: push it to `/data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin`. See [`assets/mesh/README.md`](assets/mesh/README.md) for provenance and disclaimer.
-- **Generate your own** (requires numpy):
+```text
+/data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin
+```
 
-  ```sh
-  python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
-  # then push out/hand_mesh_fb.bin to <app_data>/vdhs/hand_mesh_fb.bin
-  ```
+Without it, that extension is simply not advertised and everything else still works. The directory already exists once the module has run.
 
-`hand_mesh_fb.bin` is extracted from a PICO system resource and is included only so the interoperability feature works out of the box. It is not affiliated with PICO and will be removed on request.
+**Use the blob from a release (recommended).** On a PC with rooted adb:
+
+```sh
+adb push hand_mesh_fb.bin /data/local/tmp/
+adb shell su -c 'd=/data/data/VirtualDesktop.Android; mkdir -p $d/vdhs'
+adb shell su -c 'cp /data/local/tmp/hand_mesh_fb.bin /data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin'
+adb shell su -c 'd=/data/data/VirtualDesktop.Android; chown $(stat -c %u:%g $d) $d/vdhs/hand_mesh_fb.bin; chmod 0644 $d/vdhs/hand_mesh_fb.bin'
+```
+
+Restart Virtual Desktop afterwards. You can also copy it there with a root file manager on the headset.
+
+**Generate your own** (requires numpy):
+
+```sh
+python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
+# then copy out/hand_mesh_fb.bin in as above
+```
+
+Provenance and disclaimer: [`assets/mesh/README.md`](assets/mesh/README.md).
 
 ## Known issues
 

@@ -115,8 +115,8 @@ assembly you already produced for your own device.
 ## 5. Configuration and rollback
 
 - `payload/mode.txt` (and `VDHS_MODE`): `1` = injection smoke test only
-  (rollback), `2` = full layer. The module ships `1` so the very first boot
-  proves injection without touching the managed runtime.
+  (rollback), `2` = full layer. The module ships `2` (the full layer); set it to
+  `1` for a control run that leaves the managed runtime untouched.
 - `payload/backend.txt` (and `VDHS_BACKEND`): managed backend, above.
 - `<app_data>/vdhs/hand_gesture.txt`: the runtime feature toggles.
 

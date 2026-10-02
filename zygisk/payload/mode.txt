@@ -1,8 +1,7 @@
 # Payload mode, read by the native payload at runtime (overrides VDHS_MODE).
-#   1 = Layer-1 smoke test: inject + reach Mono, but do NOT load VdHsMod.dll.
+#   1 = smoke test: inject and reach Mono, but do NOT load VdHsMod.dll.
 #   2 = full: load VdHsMod.dll and invoke Loader.Start().
 #
-# Shipped default is 1 on purpose: the very first boot after installing this
-# module should only prove injection, never touch the managed runtime yet.
-# Run this mode first, then change the value to 2 and reboot to load the layer.
-1
+# Shipped default is 2: the full compatibility layer. Set it to 1 for a
+# control run that leaves the managed runtime untouched.
+2

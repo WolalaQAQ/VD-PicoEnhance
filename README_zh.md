@@ -72,8 +72,11 @@ pwsh -File zygisk/build.ps1 -Pack
 ## 安装
 
 1. 在 Magisk 里选择 **模块 → 从本地安装**，选择 `vdhs_zygisk.zip`，然后重启头显。
-2. 自带的 `payload/mode.txt` 是 `1`，只做注入冒烟测试，不加载托管层。确认模块生效后，把 `/data/adb/modules/vdhs_zygisk/payload/mode.txt` 改成 `2`，重启 Virtual Desktop 才会启用完整的兼容层。
-3. 之后只更新载荷时不必重启整机：把 `libvdhs.so` 推到 `/data/adb/modules/vdhs_zygisk/payload/`，重启 Virtual Desktop 即可。
+2. 重启后模块即启用完整兼容层，启动 Virtual Desktop 就能用上手追、透视和眼动修正。
+
+`payload/mode.txt` 默认为 `2`，即完整兼容层。需要做“只注入、不加载托管层”的对照测试时，把 `/data/adb/modules/vdhs_zygisk/payload/mode.txt` 改成 `1`，重启 Virtual Desktop 生效。
+
+之后只更新载荷时不必重启整机：把 `libvdhs.so` 推到 `/data/adb/modules/vdhs_zygisk/payload/`，重启 Virtual Desktop 即可。
 
 > PICO 处于手势模式时会阻止 Virtual Desktop 冷启动。先拿起手柄，等 `getprop sys.pxr.trackingservice.gesturemode` 变成 `0`，再启动 Virtual Desktop。
 
@@ -83,17 +86,33 @@ pwsh -File zygisk/build.ps1 -Pack
 
 ### 手部网格
 
-`XR_FB_hand_tracking_mesh` 需要放在载荷旁边的 `hand_mesh_fb.bin`；没有这个文件时，该扩展直接不可用，其他功能不受影响。
+`XR_FB_hand_tracking_mesh` 需要 `hand_mesh_fb.bin`。它要和载荷放在一起，即应用私有目录：
 
-- **直接使用 Release 附带的 blob**：把它推到 `/data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin`。来源与免责声明见 [`assets/mesh/README.md`](assets/mesh/README.md)。
-- **自行生成**（需要 numpy）：
+```text
+/data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin
+```
 
-  ```sh
-  python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
-  # 再把 out/hand_mesh_fb.bin 推到 <app_data>/vdhs/hand_mesh_fb.bin
-  ```
+没有这个文件时，该扩展不可用，其他功能不受影响。这个目录在模块运行过一次后已经存在。
 
-`hand_mesh_fb.bin` 提取自 PICO 系统资源，仅用于让互操作功能开箱可用，与 PICO 无隶属关系；如被要求会移除。
+**使用 Release 附带的 blob（推荐）**。在 PC 上通过有 root 的 adb：
+
+```sh
+adb push hand_mesh_fb.bin /data/local/tmp/
+adb shell su -c 'd=/data/data/VirtualDesktop.Android; mkdir -p $d/vdhs'
+adb shell su -c 'cp /data/local/tmp/hand_mesh_fb.bin /data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin'
+adb shell su -c 'd=/data/data/VirtualDesktop.Android; chown $(stat -c %u:%g $d) $d/vdhs/hand_mesh_fb.bin; chmod 0644 $d/vdhs/hand_mesh_fb.bin'
+```
+
+改完重启 Virtual Desktop。也可以直接在头显上用带 root 的文件管理器复制到上面的路径。
+
+**自行生成**（需要 numpy）：
+
+```sh
+python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
+# 再把 out/hand_mesh_fb.bin 按上面的方式复制进去
+```
+
+来源与免责声明见 [`assets/mesh/README.md`](assets/mesh/README.md)。
 
 ## 已知问题
 
