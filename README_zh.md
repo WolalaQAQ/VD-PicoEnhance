@@ -11,13 +11,9 @@ VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时向 Virtual Desktop 
 
 > 实验性，需要 root，且与 Virtual Desktop 版本相关。模块会 hook 一个闭源商业应用，Virtual Desktop 更新后可能失效。安装前请阅读[使用条件](#使用条件)、[已知问题](#已知问题)与[免责声明](#免责声明)。这是独立的社区项目，与 Virtual Desktop、PICO 官方无关。
 
-## v1.0.4 更新
+## 更新
 
-- **修复注视点串流的坐标偏移和额外延迟**：眼动平滑与头部姿态补偿现在只用于界面指针，串流和追踪转发保留原始眼动数据。指针头部补偿默认开启（`gaze_vd_fix=1`）。
-- **修复启动和安装问题**：修正扩展列表越界、首次安装目录权限、Hook 部分安装失败及旧载荷残留；安装步骤失败时会停止并报错。
-- **修复手部射线与捏合配置**：runtime 射线无效时使用合成射线，并校验捏合阈值，避免无效配置影响手势。
-
-修复构建已在 PICO 4 Pro / VD 1.34.22.0 上完成一轮实机观察，手／手柄切换、捏合与射线恢复、双手透视、眼动及重新启动均正常，当时头部补偿已开启。升级需安装完整模块并重启头显；已有配置中显式设置的 `gaze_vd_fix=0` 会继续生效，改为 `1` 或删除该行即可启用。详细记录见[更新日志](CHANGELOG_zh.md)。
+各版本的更新内容见[更新日志](CHANGELOG_zh.md)。
 
 ## 功能
 
@@ -81,7 +77,7 @@ pwsh -File zygisk/build.ps1 -Pack
 
 ### 一键安装（推荐）
 
-从**同一个 Release** 下载 `install-vd-picoenhance.ps1`、`vdhs_zygisk.zip` 和 `hand_mesh_fb.bin`，把三个文件放在同一目录，在 PC 上运行脚本：
+从 [Releases](https://github.com/WolalaQAQ/VD-PicoEnhance/releases/latest) 下载整合包 `VD-PicoEnhance-v<版本号>.zip`，在 PC 上解压。安装脚本、模块 ZIP 和手部网格会在同一目录中；在该目录打开 PowerShell 并运行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
@@ -89,16 +85,16 @@ powershell -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
 
 脚本会通过 adb 找到头显、检查 root、安装本地模块 ZIP、把本地 mesh 放到正确位置，最后重启头显。默认从脚本所在目录查找文件，不受终端当前工作目录影响；不会下载任何文件，缺少任一文件就报错退出。前提是头显已 root（Magisk + Zygisk）并打开 USB 调试。
 
-常用参数：`-Mode 1` 只做注入对照测试，`-NoReboot` 不自动重启，`-ZipPath` / `-MeshPath` 指定其他位置的本地文件，`-Serial` 在多台设备时指定目标。要安装其他版本，使用对应 Release 的三个文件即可。
+常用参数：`-Mode 1` 只做注入对照测试，`-NoReboot` 不自动重启，`-ZipPath` / `-MeshPath` 指定其他位置的本地文件，`-Serial` 在多台设备时指定目标。要安装其他版本，使用对应 Release 的整合包即可。
 
 ### 手动安装
 
-1. 在 Magisk 里选择 **模块 → 从本地安装**，选择 `vdhs_zygisk.zip`，然后重启头显。
+1. 解压整合包，在 Magisk 里选择 **模块 → 从本地安装**，选择其中的 `vdhs_zygisk.zip`，然后重启头显。
 2. 启动一次 Virtual Desktop，再按下文[手部网格](#手部网格)说明放入 `hand_mesh_fb.bin` 并重启应用。一键安装已包含网格安装。
 
 `payload/mode.txt` 默认为 `2`，即完整兼容层。需要做“只注入、不加载托管层”的对照测试时，把 `/data/adb/modules/vdhs_zygisk/payload/mode.txt` 改成 `1`，重启 Virtual Desktop 生效。
 
-之后只更新载荷时不必重启整机：把 `libvdhs.so` 推到 `/data/adb/modules/vdhs_zygisk/payload/`，重启 Virtual Desktop 即可。v1.0.4 同时更新了注入器，升级到此版本需安装完整 ZIP 并重启头显。
+升级时，使用新版整合包重新运行安装脚本，安装完整模块并重启头显。
 
 > PICO 处于手势模式时会阻止 Virtual Desktop 冷启动。先拿起手柄，等 `getprop sys.pxr.trackingservice.gesturemode` 变成 `0`，再启动 Virtual Desktop。
 
@@ -106,7 +102,7 @@ powershell -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
 
 把 [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) 复制到设备上的 `/data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt`，按需修改。每个键都是可选的，缺省时沿用内置默认值；该文件里列出了全部键名与当前建议值。
 
-SteamVR 手部透视需设置 `pt_hole=1`，并打开 VD 的“VR 手部透视”。v1.0.4 的界面眼动平滑和头部补偿默认开启；旧配置中的显式设置优先于默认值。保存配置后重启 VD 生效。
+SteamVR 手部透视需设置 `pt_hole=1`，并打开 VD 的“VR 手部透视”。界面眼动平滑和头部补偿默认开启；旧配置中的显式设置优先于默认值。保存配置后重启 VD 生效。
 
 ### 手部网格
 

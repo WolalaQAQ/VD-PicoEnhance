@@ -70,6 +70,12 @@ jobs:
             }) -join "`n") + "`n"
             # LF only: the checksum file is consumed by sha256sum on Linux.
             [IO.File]::WriteAllText((Join-Path $directory.FullName 'SHA256SUMS.txt'), $text, [Text.UTF8Encoding]::new($false))
+            # Extracting the bundle puts the installer and its inputs together.
+            # Its checksum file covers the contents; the external copy also covers the bundle.
+            $bundle = "VD-PicoEnhance-v$env:MODULE_VERSION.zip"
+            Compress-Archive -LiteralPath (@($names) + 'SHA256SUMS.txt') -DestinationPath $bundle
+            $bundleHash = (Get-FileHash -LiteralPath $bundle -Algorithm SHA256).Hash.ToLowerInvariant()
+            [IO.File]::AppendAllText((Join-Path $directory.FullName 'SHA256SUMS.txt'), "$bundleHash  $bundle`n", [Text.UTF8Encoding]::new($false))
             Get-Content SHA256SUMS.txt
           } finally { Pop-Location }
 

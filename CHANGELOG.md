@@ -18,7 +18,8 @@ English | [简体中文](CHANGELOG_zh.md)
 ### Changed
 
 - Enable UI-pointer head-pose compensation by default (`gaze_vd_fix=1`). Gaze smoothing remains enabled by default. Both settings apply only to the pointer.
-- Add release notes to both READMEs and provide separate English and Chinese changelogs. Correct the manual mesh-installation permissions.
+- Provide separate English and Chinese changelogs linked from the READMEs, and correct the manual mesh-installation permissions.
+- Add `VD-PicoEnhance-v1.0.4.zip`, bundling the installer, module ZIP, hand mesh, license notices and checksums in one download.
 
 ### Upgrading
 

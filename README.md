@@ -11,13 +11,9 @@ VD-PicoEnhance is a Magisk/Zygisk module that injects a small OpenXR compatibili
 
 > Experimental, requires root, and tied to the Virtual Desktop version. The module hooks a closed-source commercial app and may break when Virtual Desktop updates. Read [Requirements](#requirements), [Known issues](#known-issues) and [Disclaimer](#disclaimer) before installing. This is an independent community project, not affiliated with Virtual Desktop or PICO.
 
-## v1.0.4 update
+## Updates
 
-- **Fix foveated-streaming offsets and added latency**: gaze smoothing and head-pose compensation now apply only to the UI pointer. Streaming and tracking forwarding retain upstream gaze data. Pointer head-pose compensation is enabled by default (`gaze_vd_fix=1`).
-- **Fix startup and installation issues**: correct an extension-list overflow, first-install directory permissions, partial hook installation and stale payloads. Failed installation steps now stop with an error.
-- **Fix hand rays and pinch configuration**: use a synthesised ray when the runtime ray is invalid, and validate pinch thresholds before applying them.
-
-The fixes passed one on-device functional observation on PICO 4 Pro / VD 1.34.22.0 covering hand/controller switching, pinch and ray recovery, both-hand passthrough, gaze and app restart, with head-pose compensation enabled. Install the full module and reboot to upgrade. An existing explicit `gaze_vd_fix=0` still takes precedence; change it to `1` or remove the line to enable compensation. See the [changelog](CHANGELOG.md) for details.
+See the [changelog](CHANGELOG.md) for changes in each version.
 
 ## Features
 
@@ -81,7 +77,7 @@ The native payload must build with zero warnings; the default managed build rest
 
 ### One-shot installer (recommended)
 
-Download `install-vd-picoenhance.ps1`, `vdhs_zygisk.zip` and `hand_mesh_fb.bin` from **the same Release**, put all three files in one directory, and run the script on the PC:
+Download `VD-PicoEnhance-v<version>.zip` from [Releases](https://github.com/WolalaQAQ/VD-PicoEnhance/releases/latest) and extract it on the PC. The installer, module ZIP and hand mesh will be in the same directory. Open PowerShell there and run:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
@@ -89,16 +85,16 @@ powershell -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
 
 The script finds the headset over adb, checks root, installs the local module ZIP, places the local mesh in the right directory, and reboots the headset. It looks beside the script, regardless of the terminal's working directory; it never downloads files and stops if either file is missing. The headset must be rooted (Magisk + Zygisk) with USB debugging enabled.
 
-Useful parameters: `-Mode 1` for an injection-only control run, `-NoReboot` to skip the automatic reboot, `-ZipPath` / `-MeshPath` to specify local files elsewhere, and `-Serial` to pick a device when several are connected. To install a different version, use the three files from that Release.
+Useful parameters: `-Mode 1` for an injection-only control run, `-NoReboot` to skip the automatic reboot, `-ZipPath` / `-MeshPath` to specify local files elsewhere, and `-Serial` to pick a device when several are connected. To install a different version, use the bundle from that release.
 
 ### Manual installation
 
-1. In Magisk choose **Modules → Install from storage**, select `vdhs_zygisk.zip`, then reboot the headset.
+1. Extract the bundle. In Magisk choose **Modules → Install from storage**, select the included `vdhs_zygisk.zip`, then reboot the headset.
 2. Launch Virtual Desktop once, install `hand_mesh_fb.bin` as described under [Hand mesh](#hand-mesh), then restart the app. The one-shot installer includes mesh installation.
 
 `payload/mode.txt` defaults to `2`, the full layer. For a control run that only injects and does not load the managed layer, change `/data/adb/modules/vdhs_zygisk/payload/mode.txt` to `1` and restart Virtual Desktop.
 
-To update only the payload later, a reboot is not needed: push `libvdhs.so` to `/data/adb/modules/vdhs_zygisk/payload/` and restart Virtual Desktop. v1.0.4 also updates the injector, so upgrading to this version requires the full ZIP and a headset reboot.
+To upgrade, run the installer from the new bundle to install the full module, then reboot the headset.
 
 > PICO blocks a Virtual Desktop cold start while it is in gesture mode. Pick up the controller, wait until `getprop sys.pxr.trackingservice.gesturemode` returns `0`, then start Virtual Desktop.
 
@@ -106,7 +102,7 @@ To update only the payload later, a reboot is not needed: push `libvdhs.so` to `
 
 Copy [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) to `/data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt` on the headset and adjust it as needed. Every key is optional; a missing key keeps its built-in default. The example lists all key names with the currently recommended values.
 
-For SteamVR hand passthrough, set `pt_hole=1` and enable VD's VR hand-passthrough setting. In v1.0.4, UI gaze smoothing and head-pose compensation are enabled by default; explicit values in an existing configuration override the defaults. Restart VD after saving changes.
+For SteamVR hand passthrough, set `pt_hole=1` and enable VD's VR hand-passthrough setting. UI gaze smoothing and head-pose compensation are enabled by default; explicit values in an existing configuration override the defaults. Restart VD after saving changes.
 
 ### Hand mesh
 
