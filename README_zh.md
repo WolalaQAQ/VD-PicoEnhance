@@ -71,6 +71,20 @@ pwsh -File zygisk/build.ps1 -Pack
 
 ## 安装
 
+### 一键安装（推荐）
+
+从 Releases 下载 `install-vd-picoenhance.ps1`，在 PC 上运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
+```
+
+脚本会通过 adb 找到头显、检查 root、下载并安装模块、把 mesh 放到正确位置，最后重启头显。前提是头显已 root（Magisk + Zygisk）并打开 USB 调试。
+
+常用参数：`-Tag v1.0.2` 指定版本，`-Mode 1` 只做注入对照测试，`-NoReboot` 不自动重启，`-ZipPath` / `-MeshPath` 改用本地文件，`-Serial` 在多台设备时指定目标。
+
+### 手动安装
+
 1. 在 Magisk 里选择 **模块 → 从本地安装**，选择 `vdhs_zygisk.zip`，然后重启头显。
 2. 重启后模块即启用完整兼容层，启动 Virtual Desktop 就能用上手追、透视和眼动修正。
 

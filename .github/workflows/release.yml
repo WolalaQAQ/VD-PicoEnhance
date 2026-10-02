@@ -59,7 +59,7 @@ jobs:
           $mesh = 'assets/mesh/hand_mesh_fb.bin'
           foreach ($f in @($zip, $mesh)) { if (-not (Test-Path -LiteralPath $f)) { throw "missing build output: $f" } }
           $directory = New-Item -ItemType Directory -Force -Path artifacts/release
-          foreach ($f in @($zip, $mesh, 'LICENSE', 'THIRD_PARTY_NOTICES.md')) {
+          foreach ($f in @($zip, $mesh, 'tools/install-vd-picoenhance.ps1', 'LICENSE', 'THIRD_PARTY_NOTICES.md')) {
             Copy-Item -LiteralPath $f -Destination $directory.FullName -Force
           }
           Push-Location $directory.FullName
@@ -109,4 +109,4 @@ jobs:
           gh release create "$RELEASE_TAG" \
             --verify-tag --generate-notes \
             --title "VD-PicoEnhance $RELEASE_TAG" \
-            *.zip *.bin SHA256SUMS.txt LICENSE THIRD_PARTY_NOTICES.md
+            *.zip *.bin *.ps1 SHA256SUMS.txt LICENSE THIRD_PARTY_NOTICES.md

@@ -71,6 +71,20 @@ The native payload must build with zero warnings; the default managed build rest
 
 ## Installation
 
+### One-shot installer (recommended)
+
+Download `install-vd-picoenhance.ps1` from Releases and run it on the PC:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
+```
+
+The script finds the headset over adb, checks root, downloads and installs the module, places the mesh in the right directory, and reboots the headset. The headset must be rooted (Magisk + Zygisk) with USB debugging enabled.
+
+Useful parameters: `-Tag v1.0.2` for a specific version, `-Mode 1` for an injection-only control run, `-NoReboot` to skip the automatic reboot, `-ZipPath` / `-MeshPath` to use local files, and `-Serial` to pick a device when several are connected.
+
+### Manual installation
+
 1. In Magisk choose **Modules → Install from storage**, select `vdhs_zygisk.zip`, then reboot the headset.
 2. After the reboot the full compatibility layer is active; start Virtual Desktop and hand tracking, passthrough and the eye-gaze fix are available.
 
