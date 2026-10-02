@@ -4,7 +4,7 @@ using System.Threading;
 namespace VdHsMod
 {
     /// <summary>
-    /// Diagnostic for V4/V5, independent of the backend. Waits for VD's
+    /// Diagnostic, independent of the backend. Waits for VD's
     /// XR._instance, then polls xrGetActiveInputDeviceTypePico through the
     /// native payload. The runtime only resolves that function when the
     /// instance was created with XR_PICO_android_controller_function_ext_enable,

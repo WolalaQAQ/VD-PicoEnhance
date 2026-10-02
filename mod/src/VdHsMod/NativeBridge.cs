@@ -6,15 +6,14 @@ namespace VdHsMod
     /// <summary>
     /// Bridge to the shared native payload <c>libvdhs.so</c>.
     ///
-    /// The payload is the SAME artifact Track R loads (patch/native/vdhs_mark.c
-    /// -> mod/native/vdhs_mark.c, single source): Track R's patched
-    /// Xenko.OpenXR.dll calls <c>vdhs_mark</c>, Track Z's Zygisk module dlopens
-    /// it as the injection payload.
+    /// The payload is the SAME artifact the patched-Xenko.OpenXR.dll route
+    /// loads: that route's patched Xenko.OpenXR.dll calls <c>vdhs_mark</c>, and
+    /// the Zygisk route dlopens it as the injection payload.
     ///
     /// We deliberately do NOT use [DllImport("libvdhs")] here. On the official
     /// APK's Mono (dotnet/runtime netcore Mono):
     ///   * <c>mono_dllmap_insert</c> is a stub that calls g_assert_not_reached(),
-    ///     so Track Z cannot install a dllmap;
+    ///     so the Zygisk route cannot install a dllmap;
     ///   * the app loads its libraries in the classloader linker namespace, and
     ///     this mod's native payload runs in the default namespace, so a
     ///     DllImport("libvdhs") lookup cannot find the staged .so either.
@@ -60,7 +59,7 @@ namespace VdHsMod
         }
 
         /// <summary>
-        /// Active input device type: 0 HMD, 1 controller, 2 hand (E-023).
+        /// Active input device type: 0 HMD, 1 controller, 2 hand.
         /// Returns -1 when unavailable (no instance yet / native missing).
         /// </summary>
         public static int ActiveInput()

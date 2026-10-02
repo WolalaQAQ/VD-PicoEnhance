@@ -6,10 +6,10 @@ namespace VdHsMod
     /// <summary>
     /// Every handle into VD is resolved here, by name. Nothing in this assembly
     /// holds a compile-time reference to Xenko.*, VirtualDesktop.* or
-    /// Mono.Android.* through reflection only.
+    /// Mono.Android.*; everything goes through reflection.
     ///
     /// All type/field/method names below are <c>observed</c> in
-    /// VD 1.34.22.0 (E-023 / decompiled Xenko.OpenXR).
+    /// VD 1.34.22.0 (from the app's managed assembly).
     /// </summary>
     internal static class VdReflection
     {
@@ -20,7 +20,7 @@ namespace VdHsMod
         public const string EnumExtensionsTypeName = "System.EnumExtensions";
         public const string EnumCacheNestedName = "Cache`1";
 
-        // E-023: the two PICO extensions and the enum slots the v4 patch used.
+        // The two PICO extensions and their enum slots.
         public const string ControllerExtension = "XR_PICO_android_controller_function_ext_enable";
         public const string HandTrackingExtension = "XR_PICO_hand_tracking";
         public const int ControllerExtensionValue = 118;

@@ -120,7 +120,7 @@ static const char* const kLayerExts[] = { "XR_FB_hand_tracking_mesh", "XR_FB_han
 enum { kLayerExtCount = (int)(sizeof kLayerExts / sizeof kLayerExts[0]) };
 static const int g_advertise_layer_exts = 1;
 static const char kHandExt[] = "XR_EXT_hand_tracking";
-// Xenko.OpenXR.Extension values (extracted/decompiled/.../Extension.cs).
+// Xenko.OpenXR.Extension values (from the app's managed assembly).
 enum { kExtEnumHandTracking = 27, kExtEnumFbAim = 50, kExtEnumFbMesh = 52 };
 
 // ---------------------------------------------------------------- passthrough diagnostics

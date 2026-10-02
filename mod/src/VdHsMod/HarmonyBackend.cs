@@ -16,10 +16,10 @@ namespace VdHsMod
     ///     xrMarkApiClass(0x3b) at the exact point VD has finished
     ///     xrInitializeLoaderKHR and is about to enumerate/choose extensions.
     ///
-    /// Availability is <c>unverified</c>: the official APK is AOT-compiled
-    /// (E-026), and whether Harmony/MonoMod can detour an AOT method on this
-    /// Mono 9 build is exactly what the device test must answer. If it cannot,
-    /// the redirect backend is the fallback.
+    /// Availability is <c>unverified</c>: the official APK is AOT-compiled, and
+    /// whether Harmony/MonoMod can detour an AOT method on this Mono build is
+    /// exactly what the device test must answer. If it cannot, the redirect
+    /// backend is the fallback.
     ///
     /// The build is opt-in so the default artifact has no NuGet dependency:
     ///   dotnet build -p:VdHsHarmony=true

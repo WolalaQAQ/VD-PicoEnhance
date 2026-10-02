@@ -1,4 +1,4 @@
-// Track Z payload entry, exported from the shared libvdhs.so.
+// Payload entry, exported from the shared libvdhs.so.
 //
 // The Zygisk module (zygisk/jni/module.cpp) stages this library plus
 // VdHsMod.dll into the target app's data dir, dlopens it, and calls
@@ -189,7 +189,7 @@ static int resolve_mapped_symbols(const char* needle, const char* const* names,
 }
 
 // Single-symbol variant, exported for vdhs_mark.c (weak reference there, so
-// the Track R build without this file still links).
+// a build without this file still links).
 __attribute__((visibility("default")))
 void* vdhs_resolve_mapped_symbol(const char* lib, const char* name) {
     const char* names[1] = { name };

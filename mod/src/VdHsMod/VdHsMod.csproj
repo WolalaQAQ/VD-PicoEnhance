@@ -27,7 +27,7 @@
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <Version>1.0.0</Version>
     <Product>VdHsMod</Product>
-    <Description>VD hand/controller hot-switch mod (Track Z / Track R shared payload)</Description>
+    <Description>VD hand/controller hot-switch mod</Description>
     <!-- Never copy a netstandard shim next to the assembly; the app supplies the facade. -->
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>

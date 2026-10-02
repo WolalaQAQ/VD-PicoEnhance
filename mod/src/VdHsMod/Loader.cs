@@ -5,11 +5,10 @@ namespace VdHsMod
     /// <summary>
     /// The single entry point both loaders call.
     ///
-    /// Track R: a one-line pin baked into the assembly store calls
-    ///          <c>VdHsMod.Loader.Start()</c>.
-    /// Track Z: the Zygisk native payload opens this assembly through the Mono
-    ///          embedding API and invokes <c>Loader.Start()</c> with no
-    ///          arguments and no return value.
+    /// The patched-Xenko.OpenXR.dll route calls <c>VdHsMod.Loader.Start()</c>
+    /// through a one-line pin baked into the assembly store.
+    /// The Zygisk route opens this assembly through the Mono embedding API and
+    /// invokes <c>Loader.Start()</c> with no arguments and no return value.
     ///
     /// Contract: Start() must never throw. Every step is wrapped;
     /// a failure degrades to a no-op so the host process (VD) survives.

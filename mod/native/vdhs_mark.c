@@ -7,15 +7,15 @@
 // forward loader named in /vendor/etc/openxr/1/active_runtime.json.
 //
 // This file is the SINGLE SOURCE shared by both routes:
-//   Track R: patch/native/vdhs_mark.c #includes this file, the patched
-//            Xenko.OpenXR.dll P/Invokes vdhs_mark().
-//   Track Z: the Zygisk payload is this same libvdhs.so; VdHsMod uses
-//            vdhs_mark_loaded() / vdhs_active_input().
+//   The patched-Xenko.OpenXR.dll route #includes this file and its P/Invoke
+//   calls vdhs_mark().
+//   The Zygisk route loads this same libvdhs.so; VdHsMod uses
+//   vdhs_mark_loaded() / vdhs_active_input().
 //
 // Exports:
-//   int  vdhs_mark(const void* loaderInitInfo, uint64_t mask)  (v9, unchanged)
-//   int  vdhs_mark_loaded(void)                                (Track Z)
-//   int  vdhs_active_input(uint64_t instance)                  (Track Z)
+//   int  vdhs_mark(const void* loaderInitInfo, uint64_t mask)
+//   int  vdhs_mark_loaded(void)                                (Zygisk route)
+//   int  vdhs_active_input(uint64_t instance)                  (Zygisk route)
 #include <dlfcn.h>
 #include <jni.h>
 #include <pthread.h>
@@ -54,15 +54,15 @@ typedef XrResult (*PFN_xrEnumerateInstanceExtensionProperties)(const char*, uint
 
 #define XR_MAKE_VERSION(ma, mi, pa) ((((uint64_t)(ma)) << 48) | (((uint64_t)(mi) & 0xffff) << 32) | ((pa) & 0xffffffffULL))
 
-// The mark mask v9 ships: enables the controller-function + hand-tracking
-// extension state bits (E-025).
+// The mark mask used here: enables the controller-function + hand-tracking
+// extension state bits.
 #define VDHS_MARK_MASK 0x3bULL
 
 static PFN_xrGetInstanceProcAddr g_gipa = 0;   // runtime GIPA, cached after first negotiate
 
 // Open the system forward loader and negotiate a runtime interface. Idempotent.
 // Returns 0 on success, negative step on failure.
-// Provided by vdhs_payload.c (Track Z only). Weak so Track R's standalone
+// Provided by vdhs_payload.c (Zygisk route only). Weak so a standalone
 // build of this file still links; there it is NULL and we use dlopen.
 extern void* vdhs_resolve_mapped_symbol(const char* lib, const char* name) __attribute__((weak));
 
@@ -70,7 +70,7 @@ static int ensure_runtime(void) {
     if (g_gipa) return 0;
     PFN_xrNegotiateLoaderRuntimeInterface neg = 0;
     if (vdhs_resolve_mapped_symbol) {
-        // Track Z: this library was dlopened by the Zygisk module in the
+        // This library was dlopened by the Zygisk module in the
         // default linker namespace. dlopen("libopenxr_forwardloader.so") from
         // here yields a SECOND, uninitialised loader instance and calling it
         // crashes VD (SIGSEGV, observed). Bind to the copy VD already mapped
@@ -154,7 +154,7 @@ int vdhs_mark(const void* loaderInitInfo, uint64_t mask) {
     return 0;
 }
 
-// Track Z: the runtime has already been initialised by VD's xrInitializeLoaderKHR.
+// The runtime has already been initialised by VD's xrInitializeLoaderKHR.
 // Negotiate only, then mark. Safe to call repeatedly; the mark is an OR of bits.
 // Called by the compat layer (vdhs_layer.c) on VD's own thread, so negotiate
 // sees a JVM-attached thread with the app classloader.
@@ -181,7 +181,7 @@ void vdhs_runtime_reset(void) { g_gipa = 0; }
 // compat layer the mark happens inside the enumerate hook on VD's thread, so
 // this only tries once and never spawns a thread.
 // Returns 0 when marked, -1 when the runtime is not up yet, <0 on error.
-extern int vdhs_layer_active(void) __attribute__((weak));   // Track Z only
+extern int vdhs_layer_active(void) __attribute__((weak));   // Zygisk route only
 int vdhs_mark_loaded(void) {
     // With the layer's hooks in place the mark is done on VD's thread; a second
     // negotiate from the managed payload thread is exactly that risk.
@@ -189,7 +189,7 @@ int vdhs_mark_loaded(void) {
     return mark_now();
 }
 
-// Track Z: poll PICO's active input device. 0=HMD 1=controller 2=hand (E-023).
+// Poll PICO's active input device. 0=HMD 1=controller 2=hand.
 // Returns the value, or a negative code when unavailable.
 int vdhs_active_input(uint64_t instance) {
     if (!instance) return -10;

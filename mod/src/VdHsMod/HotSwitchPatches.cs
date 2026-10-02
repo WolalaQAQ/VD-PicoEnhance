@@ -55,7 +55,7 @@ namespace VdHsMod
         /// Prefix for GetPlatformExtensions. Runs after VD's
         /// xrInitializeLoaderKHR has succeeded and before it enumerates
         /// extension properties, which is the exact window xrMarkApiClass must
-        /// hit (the v9 ordering, E-025).
+        /// hit.
         /// </summary>
         private static void GetPlatformExtensionsPrefix()
         {

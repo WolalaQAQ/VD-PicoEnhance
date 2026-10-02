@@ -11,13 +11,13 @@ namespace VdHsMod
     /// is never used.
     ///
     /// Why a separate artifact and not Harmony: the OFFICIAL APK is AOT
-    /// ("normal", 172 libaot-*.so, E-026). A Harmony/MonoMod detour may or may
+    /// ("normal", 172 libaot-*.so). A Harmony/MonoMod detour may or may
     /// not take over an AOT-compiled method. A replaced assembly whose MVID
     /// differs from the AOT image is rejected by the AOT loader and JITed
     /// instead, so the IL patch is guaranteed to run (inferred, must be tested).
     ///
     /// Artifact: <c>&lt;payload&gt;/Xenko.OpenXR.patched.dll</c>, produced from the
-    /// Track R pipeline (patch_handswitch8/9.cs) PLUS an MVID bump so the
+    /// patch pipeline PLUS an MVID bump so the
     /// official libaot-Xenko.OpenXR.dll.so no longer matches.
     /// </summary>
     internal sealed class RedirectBackend : IHotSwitchBackend

@@ -5,7 +5,7 @@ namespace VdHsMod
 {
     /// <summary>
     /// Logging. In this app only <c>Android.Util.Log</c> reaches logcat
-    /// (observed, E-024): plain <c>Console.WriteLine</c> does not. Mono.Android
+    /// (observed): plain <c>Console.WriteLine</c> does not. Mono.Android
     /// is always loaded in the process, so we reach it by name through
     /// reflection - no compile-time reference.
     /// </summary>

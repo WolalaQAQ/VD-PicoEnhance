@@ -1,11 +1,11 @@
-# Builds the shared native payload libvdhs.so (Track R + Track Z).
+# Builds the shared native payload libvdhs.so.
 #
-# vdhs_mark.c    - the canonical xrMarkApiClass(0x3b) reach-through (v9)
-# vdhs_payload.c - Track Z Mono embedding loader (exports vdhs_payload_main)
+# vdhs_mark.c    - the canonical xrMarkApiClass(0x3b) reach-through
+# vdhs_payload.c - Mono embedding loader (exports vdhs_payload_main)
 # vdhs_layer.c   - compat layer: inline hooks on VD's bundled libopenxr_loader.so
 # vdhs_pt.c      - zero-copy alpha hole in the VR projection swapchain (pt_hole)
 #
-# Built by zygisk/build.ps1 with the NDK cmake/ninja from AGENTS.md.
+# Built by zygisk/build.ps1 with the pinned NDK cmake/ninja.
 cmake_minimum_required(VERSION 3.22)
 project(vdhs_native C ASM)
 
