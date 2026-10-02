@@ -73,15 +73,15 @@ The native payload must build with zero warnings; the default managed build rest
 
 ### One-shot installer (recommended)
 
-Download `install-vd-picoenhance.ps1` from Releases and run it on the PC:
+Download `install-vd-picoenhance.ps1`, `vdhs_zygisk.zip` and `hand_mesh_fb.bin` from **the same Release**, put all three files in one directory, and run the script on the PC:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
 ```
 
-The script finds the headset over adb, checks root, downloads and installs the module, places the mesh in the right directory, and reboots the headset. The headset must be rooted (Magisk + Zygisk) with USB debugging enabled.
+The script finds the headset over adb, checks root, installs the local module ZIP, places the local mesh in the right directory, and reboots the headset. It looks beside the script, regardless of the terminal's working directory; it never downloads files and stops if either file is missing. The headset must be rooted (Magisk + Zygisk) with USB debugging enabled.
 
-Useful parameters: `-Tag v1.0.2` for a specific version, `-Mode 1` for an injection-only control run, `-NoReboot` to skip the automatic reboot, `-ZipPath` / `-MeshPath` to use local files, and `-Serial` to pick a device when several are connected.
+Useful parameters: `-Mode 1` for an injection-only control run, `-NoReboot` to skip the automatic reboot, `-ZipPath` / `-MeshPath` to specify local files elsewhere, and `-Serial` to pick a device when several are connected. To install a different version, use the three files from that Release.
 
 ### Manual installation
 

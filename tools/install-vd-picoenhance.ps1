@@ -4,22 +4,23 @@
     One-shot installer for the VD-PicoEnhance Magisk module and its hand mesh.
 
 .DESCRIPTION
-    Downloads the module ZIP and the hand mesh from a GitHub release, pushes
-    them to a connected headset over adb, installs the Magisk module, places
-    the mesh in Virtual Desktop's private directory, and reboots the headset.
+    Uses the module ZIP and hand mesh beside this script, pushes them to a
+    connected headset over adb, installs the Magisk module, places the mesh
+    in Virtual Desktop's private directory, and reboots the headset.
+
+    Download install-vd-picoenhance.ps1, vdhs_zygisk.zip and hand_mesh_fb.bin
+    from the same release and keep them in one directory. This script never
+    downloads files; missing files cause an error before any device changes.
 
     Requirements: a rooted PICO 4 Pro (Magisk with Zygisk), Virtual Desktop
     Android 1.34.22.0 installed, and adb available (on PATH, or via -Adb, or
     under $env:ANDROID_HOME / $env:ANDROID_SDK_ROOT).
 
-.PARAMETER Tag
-    Release tag to install, for example v1.0.2. Defaults to the latest release.
-
 .PARAMETER ZipPath
-    Use a local Magisk module ZIP instead of downloading one.
+    Local Magisk module ZIP. Defaults to vdhs_zygisk.zip beside this script.
 
 .PARAMETER MeshPath
-    Use a local hand mesh blob instead of downloading one.
+    Local hand mesh blob. Defaults to hand_mesh_fb.bin beside this script.
 
 .PARAMETER Adb
     Path to adb.exe. Defaults to adb on PATH, then the SDK platform-tools.
@@ -38,11 +39,10 @@
     ./install-vd-picoenhance.ps1
 
 .EXAMPLE
-    ./install-vd-picoenhance.ps1 -Tag v1.0.2 -Mode 2
+    ./install-vd-picoenhance.ps1 -ZipPath ./vdhs_zygisk.zip -MeshPath ./hand_mesh_fb.bin -NoReboot
 #>
 [CmdletBinding()]
 param(
-    [string]$Tag,
     [string]$ZipPath,
     [string]$MeshPath,
     [string]$Adb,
@@ -53,13 +53,27 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$Repo = 'WolalaQAQ/VD-PicoEnhance'
 $AppId = 'VirtualDesktop.Android'
 $ModuleId = 'vdhs_zygisk'
 $AppDir = "/data/data/$AppId"
 
 function Write-Step { param([string]$Message) Write-Host "==> $Message" -ForegroundColor Cyan }
 function Write-Ok { param([string]$Message) Write-Host "    $Message" -ForegroundColor Green }
+
+# --- locate the local module and mesh ---------------------------------------
+Write-Step 'Looking for the local module and hand mesh'
+if (-not $ZipPath) { $ZipPath = Join-Path $PSScriptRoot 'vdhs_zygisk.zip' }
+if (-not $MeshPath) { $MeshPath = Join-Path $PSScriptRoot 'hand_mesh_fb.bin' }
+if (-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)) {
+    throw "Module ZIP not found: $ZipPath. Keep vdhs_zygisk.zip from the same release beside this script, or pass -ZipPath. No files will be downloaded."
+}
+if (-not (Test-Path -LiteralPath $MeshPath -PathType Leaf)) {
+    throw "Hand mesh not found: $MeshPath. Keep hand_mesh_fb.bin from the same release beside this script, or pass -MeshPath. No files will be downloaded."
+}
+$ZipPath = (Resolve-Path -LiteralPath $ZipPath).ProviderPath
+$MeshPath = (Resolve-Path -LiteralPath $MeshPath).ProviderPath
+Write-Ok "module: $ZipPath"
+Write-Ok "mesh: $MeshPath"
 
 # --- locate adb -------------------------------------------------------------
 if (-not $Adb) {
@@ -101,25 +115,6 @@ if ($id -notmatch 'uid=0') {
 }
 Write-Ok 'root ok'
 
-# --- fetch the module and the mesh -----------------------------------------
-$base = if ($Tag) { "https://github.com/$Repo/releases/download/$Tag" } else { "https://github.com/$Repo/releases/latest/download" }
-$temp = Join-Path ([IO.Path]::GetTempPath()) ('vd-picoenhance-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Force -Path $temp | Out-Null
-
-if (-not $ZipPath) {
-    $ZipPath = Join-Path $temp 'vdhs_zygisk.zip'
-    Write-Step "Downloading the module from $base"
-    Invoke-WebRequest -UseBasicParsing -Uri "$base/vdhs_zygisk.zip" -OutFile $ZipPath
-}
-if (-not (Test-Path -LiteralPath $ZipPath)) { throw "Module ZIP not found: $ZipPath" }
-
-if (-not $MeshPath) {
-    $MeshPath = Join-Path $temp 'hand_mesh_fb.bin'
-    Write-Step "Downloading the hand mesh from $base"
-    Invoke-WebRequest -UseBasicParsing -Uri "$base/hand_mesh_fb.bin" -OutFile $MeshPath
-}
-if (-not (Test-Path -LiteralPath $MeshPath)) { throw "Hand mesh not found: $MeshPath" }
-
 # --- push -------------------------------------------------------------------
 Write-Step 'Pushing files to the headset'
 & $Adb -s $Serial push $ZipPath /data/local/tmp/vdhs_zygisk.zip | Out-Null
@@ -150,8 +145,6 @@ if ($NoReboot) {
     & $Adb -s $Serial reboot | Out-Null
     Write-Ok 'reboot sent; the module applies during boot'
 }
-
-Remove-Item -Recurse -Force $temp -ErrorAction SilentlyContinue
 
 Write-Host ''
 Write-Host 'Done.' -ForegroundColor Green
