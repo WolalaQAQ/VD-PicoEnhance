@@ -8,9 +8,9 @@
     connected headset over adb, installs the Magisk module, places the mesh
     in Virtual Desktop's private directory, and reboots the headset.
 
-    Download install-vd-picoenhance.ps1, vdhs_zygisk.zip and hand_mesh_fb.bin
-    from the same release and keep them in one directory. This script never
-    downloads files; missing files cause an error before any device changes.
+    Download and extract VD-PicoEnhance-v<version>.zip from the release.
+    Keep this script, vdhs_zygisk.zip and hand_mesh_fb.bin together. This script
+    never downloads files; missing files cause an error before any device changes.
 
     Requirements: a rooted PICO 4 Pro (Magisk with Zygisk), Virtual Desktop
     Android 1.34.22.0 installed, and adb available (on PATH, or via -Adb, or

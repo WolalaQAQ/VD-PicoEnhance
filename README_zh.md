@@ -178,7 +178,7 @@ python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
 
 - 模块需要 **root**，并向 Virtual Desktop 注入代码。请只在自己的设备上，安装你自行构建或信任的版本。
 - 注入器只把文件 stage 到应用私有目录，不写别的位置；不改 APK、清单、签名或包名，也不动其他进程。
-- 本仓库不打包任何 Virtual Desktop、Xenko、Mono 或 PICO 的二进制或源码，唯一的例外是 Release 单独提供的手部 mesh blob，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+- 本仓库不打包任何 Virtual Desktop、Xenko、Mono 或 PICO 的二进制或源码，唯一的例外是 Release 整合包内的手部 mesh blob，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 - 提交 Issue 时请给出头显型号、PICO OS、Virtual Desktop 版本和脱敏后的日志片段，不要上传设备标识或签名密钥。
 
 ## 免责声明

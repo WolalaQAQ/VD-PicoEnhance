@@ -2,6 +2,11 @@
 
 English | [简体中文](CHANGELOG_zh.md)
 
+## 1.0.5 — 2026-10-03
+
+- GitHub Actions builds, packages and publishes the complete installer bundle when a version tag is pushed. Each release now publishes only `VD-PicoEnhance-v<version>.zip`; the installer, module ZIP, mesh, license notices and checksums are all inside it.
+- Update the installer help and documentation to use the bundle download.
+
 ## 1.0.4 — 2026-10-03
 
 ### Fixed

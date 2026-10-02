@@ -178,7 +178,7 @@ Provenance and disclaimer: [`assets/mesh/README.md`](assets/mesh/README.md).
 
 - The module needs **root** and injects code into Virtual Desktop. Use it only on your own device and only with a build you made yourself or trust.
 - The injector stages files into the app's private directory and nothing else. It does not change the APK, manifest, signature or package name, and does not touch other processes.
-- This repository bundles no Virtual Desktop, Xenko, Mono or PICO binaries or sources, with the single exception of the hand mesh blob shipped as a separate release asset; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- This repository bundles no Virtual Desktop, Xenko, Mono or PICO binaries or sources, with the single exception of the hand mesh blob included in the release bundle; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - When opening an issue, include the headset model, PICO OS version, Virtual Desktop version and sanitized log excerpts. Do not upload device identifiers or signing keys.
 
 ## Disclaimer

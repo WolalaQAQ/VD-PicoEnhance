@@ -112,7 +112,9 @@ jobs:
           set -euo pipefail
           cd release
           sha256sum --check --strict SHA256SUMS.txt
+          bundle="VD-PicoEnhance-${RELEASE_TAG}.zip"
+          test -f "$bundle"
           gh release create "$RELEASE_TAG" \
             --verify-tag --generate-notes \
             --title "VD-PicoEnhance $RELEASE_TAG" \
-            *.zip *.bin *.ps1 SHA256SUMS.txt LICENSE THIRD_PARTY_NOTICES.md
+            "$bundle"
