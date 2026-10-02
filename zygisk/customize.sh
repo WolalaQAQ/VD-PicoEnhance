@@ -4,10 +4,10 @@
 SKIPUNZIP=0
 
 if [ "$ARCH" != "arm64" ]; then
-  abort "! VD Handswitch only supports arm64 (this is a PICO 4 Pro / phoenix build)."
+  abort "! VD-PicoEnhance only supports arm64 (this is a PICO 4 Pro / phoenix build)."
 fi
 
-ui_print "- VD Handswitch (Zygisk) $MODVER"
+ui_print "- VD-PicoEnhance $MODVER"
 ui_print "- target process: VirtualDesktop.Android (untouched official APK)"
 
 # Payload files must be readable when the module dir is opened before

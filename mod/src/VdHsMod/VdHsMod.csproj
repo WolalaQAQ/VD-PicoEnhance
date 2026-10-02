@@ -25,7 +25,7 @@
     <Deterministic>true</Deterministic>
     <DebugType>none</DebugType>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-    <Version>0.1.0</Version>
+    <Version>1.0.0</Version>
     <Product>VdHsMod</Product>
     <Description>VD hand/controller hot-switch mod (Track Z / Track R shared payload)</Description>
     <!-- Never copy a netstandard shim next to the assembly; the app supplies the facade. -->
@@ -38,7 +38,7 @@
     Opt-in Harmony backend.
       dotnet build -p:VdHsHarmony=true
     Requires NuGet (Lib.Harmony). The default build is the offline-safe
-    redirect/data-only backend. See docs/HAND-VD-ZYGISK-2026-09-28.md §决策点.
+    redirect/data-only backend.
   -->
   <PropertyGroup Condition="'$(VdHsHarmony)' == 'true'">
     <DefineConstants>$(DefineConstants);VDHS_HARMONY</DefineConstants>

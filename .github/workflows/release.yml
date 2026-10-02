@@ -1,113 +1,112 @@
-name: build
+name: Build and release
 
-# Tag push (v*) -> build and publish a GitHub Release with the Magisk module,
-# the hand mesh blob, checksums and the license files.
-# Manual run (workflow_dispatch) -> build only and upload the artifacts.
 on:
   push:
     tags:
-      - "v*"
+      - 'v*'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
+    name: Build Magisk module
     runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: '8.0.x'
 
-      # Installs the command-line tools, accepts the SDK licenses and sets
-      # ANDROID_SDK_ROOT. build.ps1 reads that variable.
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
 
-      - name: Install NDK 26.1 and CMake 3.22.1
-        shell: pwsh
+      - name: Install pinned NDK and CMake
+        run: sdkmanager "ndk;26.1.10909125" "cmake;3.22.1"
+
+      - name: Verify version
         run: |
-          sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1"
-          sdkmanager --list_installed
+          $ErrorActionPreference = 'Stop'
+          $props = Get-Content -Raw zygisk/module.prop
+          $version = ([regex]::Match($props, '(?m)^version=(.+)$')).Groups[1].Value.Trim()
+          if (-not $version) { throw 'module.prop has no version' }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -cne "v$version") {
+            throw "Tag $($env:GITHUB_REF_NAME) must be v$version (module.prop version)"
+          }
+          "MODULE_VERSION=$version" >> $env:GITHUB_ENV
 
-      # Builds VdHsMod.dll + libvdhs.so + the Zygisk injector, stages
-      # zygisk/payload/, and packs zygisk/dist/vdhs_zygisk.zip.
-      - name: Build Magisk module
-        shell: pwsh
+      - name: Build hook and module
         run: pwsh -NoProfile -File zygisk/build.ps1 -Pack
 
-      - name: Verify packaged payload
-        shell: pwsh
+      - name: Prepare release assets
         run: |
-          $zip  = "zygisk/dist/vdhs_zygisk.zip"
-          $mesh = "assets/mesh/hand_mesh_fb.bin"
-          foreach ($f in @($zip, $mesh)) {
-            if (-not (Test-Path $f)) { throw "missing build output: $f" }
+          $ErrorActionPreference = 'Stop'
+          $zip = 'zygisk/dist/vdhs_zygisk.zip'
+          $mesh = 'assets/mesh/hand_mesh_fb.bin'
+          foreach ($f in @($zip, $mesh)) { if (-not (Test-Path -LiteralPath $f)) { throw "missing build output: $f" } }
+          $directory = New-Item -ItemType Directory -Force -Path artifacts/release
+          foreach ($f in @($zip, $mesh, 'LICENSE', 'THIRD_PARTY_NOTICES.md')) {
+            Copy-Item -LiteralPath $f -Destination $directory.FullName -Force
           }
-          Get-ChildItem -Recurse zygisk/payload -File |
-            ForEach-Object { "{0,10}  {1}" -f $_.Length, $_.Name }
+          Push-Location $directory.FullName
+          try {
+            $names = Get-ChildItem -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | ForEach-Object { $_.Name } | Sort-Object
+            $text = (($names | ForEach-Object {
+              "$((Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant())  $_"
+            }) -join "`n") + "`n"
+            # LF only: the checksum file is consumed by sha256sum on Linux.
+            [IO.File]::WriteAllText((Join-Path $directory.FullName 'SHA256SUMS.txt'), $text, [Text.UTF8Encoding]::new($false))
+            Get-Content SHA256SUMS.txt
+          } finally { Pop-Location }
 
-      - name: Write SHA256SUMS
-        shell: pwsh
+      - name: Upload build artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: module
+          path: artifacts/release/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: module
+          path: release
+
+      - name: Publish verified assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          $files = @("zygisk/dist/vdhs_zygisk.zip", "assets/mesh/hand_mesh_fb.bin")
-          $lines = foreach ($f in $files) {
-            $hash = (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
-            "$hash  $(Split-Path $f -Leaf)"
-          }
-          $lines | Set-Content -Path SHA256SUMS.txt -Encoding ascii
-          Get-Content SHA256SUMS.txt
-
-      - name: Upload artifacts (manual runs)
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: vdhs_zygisk
-          path: |
-            zygisk/dist/vdhs_zygisk.zip
-            assets/mesh/hand_mesh_fb.bin
-            SHA256SUMS.txt
-
-      - name: Publish GitHub Release (tag runs)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          fail_on_unmatched_files: true
-          files: |
-            zygisk/dist/vdhs_zygisk.zip
-            assets/mesh/hand_mesh_fb.bin
-            SHA256SUMS.txt
-            LICENSE
-            THIRD_PARTY_NOTICES.md
-          body: |
-            **VD-PicoEnhance** — PICO hand tracking, hand passthrough and
-            eye-gaze for the **unmodified official** Virtual Desktop on
-            **PICO 4 Pro** (root + Magisk/Zygisk).
-
-            Tested only on Virtual Desktop Android **1.34.22.0** + **PICO 4 Pro**.
-            Experimental; other Virtual Desktop versions and devices are untested.
-
-            ### Files
-            - `vdhs_zygisk.zip` — Magisk/Zygisk module. Install via
-              **Magisk → Modules → Install from storage**, then reboot. The
-              shipped `payload/mode.txt` is `1` (injection smoke test); set it to
-              `2` for the full compatibility layer.
-            - `hand_mesh_fb.bin` — the hand mesh in `XR_FB_hand_tracking_mesh`
-              format. Push it to
-              `/data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin`.
-              Converted from the headset's own PICO system resource; see
-              `assets/mesh/README.md` for provenance and disclaimer.
-            - `SHA256SUMS.txt`, `LICENSE`, `THIRD_PARTY_NOTICES.md`.
-
-            ### Disclaimer
-            Unofficial community project, not affiliated with Virtual Desktop or
-            PICO. It does not modify the Virtual Desktop APK and does not bypass
-            any license. A root module against a third-party app is used at your
-            own risk. The bundled `hand_mesh_fb.bin` is a PICO system asset
-            included only to make the hand-mesh feature work and will be removed
-            on request.
+          set -euo pipefail
+          cd release
+          sha256sum --check --strict SHA256SUMS.txt
+          gh release create "$RELEASE_TAG" \
+            --verify-tag --generate-notes \
+            --title "VD-PicoEnhance $RELEASE_TAG" \
+            *.zip *.bin SHA256SUMS.txt LICENSE THIRD_PARTY_NOTICES.md

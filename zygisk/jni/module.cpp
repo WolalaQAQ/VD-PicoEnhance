@@ -1,4 +1,4 @@
-// VD handswitch - Zygisk loader (Track Z).
+// VD-PicoEnhance - Zygisk loader.
 //
 // Thin by design (design §3.2): match the target process, stage the payload
 // files out of the module dir into the app's private data dir, dlopen

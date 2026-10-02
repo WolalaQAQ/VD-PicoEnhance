@@ -1,5 +1,5 @@
 // VD compat layer: zero-copy alpha hole in the VR projection swapchain
-// (docs/HAND-VD-COMPAT-LAYER-2026-09-28.md §4.3e).
+// (see docs/ARCHITECTURE.md).
 //
 // These four functions are NOT reached through xrGetInstanceProcAddr: VD's
 // managed side P/Invokes the loader exports directly (DllImport

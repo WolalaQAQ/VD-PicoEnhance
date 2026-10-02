@@ -1,19 +1,20 @@
-# VD handswitch (Track Z) - build everything and stage the Magisk module tree.
+# Build VD-PicoEnhance and stage the Magisk/Zygisk module tree.
 #
-#   pwsh -File zygisk/build.ps1                 # 离线安全的默认构建 (redirect/dataonly)
-#   pwsh -File zygisk/build.ps1 -Harmony        # 额外编译 Harmony 后端并 stage 0Harmony.dll
-#   pwsh -File zygisk/build.ps1 -Redirect <dll> # 额外 stage Xenko.OpenXR.patched.dll
-#   pwsh -File zygisk/build.ps1 -Pack           # 构建后打包 dist/vdhs_zygisk.zip
+#   pwsh -File zygisk/build.ps1                 # offline-safe default build
+#   pwsh -File zygisk/build.ps1 -Harmony        # also build the Harmony backend, stage 0Harmony.dll
+#   pwsh -File zygisk/build.ps1 -Redirect <dll> # also stage Xenko.OpenXR.patched.dll
+#   pwsh -File zygisk/build.ps1 -Pack           # build, then pack dist/vdhs_zygisk.zip
 #
-# 产物（module 目录即 zygisk/ 本身，`zygisk/` 子目录是 Magisk 约定的 ABI 目录）：
-#   zygisk/zygisk/arm64-v8a.so          Zygisk 注入器
-#   zygisk/payload/libvdhs.so           共享原生载荷 (Track R/Z 同一份)
-#   zygisk/payload/VdHsMod.dll          托管 mod
-#   zygisk/payload/backend.txt          后端选择
-#   zygisk/payload/0Harmony.dll         (可选)
-#   zygisk/payload/Xenko.OpenXR.patched.dll (可选, redirect 后端)
+# Outputs (the module directory is zygisk/ itself; the zygisk/ subdirectory is the
+# Magisk ABI directory):
+#   zygisk/zygisk/arm64-v8a.so          Zygisk injector
+#   zygisk/payload/libvdhs.so           shared native payload
+#   zygisk/payload/VdHsMod.dll          managed mod
+#   zygisk/payload/backend.txt          backend selection
+#   zygisk/payload/0Harmony.dll         (optional)
+#   zygisk/payload/Xenko.OpenXR.patched.dll (optional, redirect backend)
 #
-# 本脚本只写仓库内文件，不接触设备。
+# This script only writes files inside the repository and never touches a device.
 param(
     [switch]$Harmony,
     [string]$RedirectArtifact = "",
@@ -23,8 +24,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ModuleRoot = Split-Path -Parent $MyInvocation.MyCommand.Path   # .../VD-PicoHands/zygisk
-$RepoRoot   = Split-Path -Parent $ModuleRoot                    # .../VD-PicoHands
+$ModuleRoot = Split-Path -Parent $MyInvocation.MyCommand.Path   # .../VD-PicoEnhance/zygisk
+$RepoRoot   = Split-Path -Parent $ModuleRoot                    # .../VD-PicoEnhance
 
 # Toolchain paths are resolved at build time so nothing machine-specific is
 # committed. Order: ANDROID_SDK_ROOT / ANDROID_HOME, then the untracked local
@@ -110,7 +111,7 @@ if ($Pack) {
     New-Item -ItemType Directory -Force -Path $dist | Out-Null
     $zip = Join-Path $dist 'vdhs_zygisk.zip'
     Remove-Item $zip -ErrorAction SilentlyContinue
-    # Magisk 安装包根目录直接放 module.prop / 脚本 / zygisk/ / payload/
+    # The Magisk zip root holds module.prop, the scripts, zygisk/ and payload/.
     $stage = Join-Path $dist 'stage'
     if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
     New-Item -ItemType Directory -Force -Path $stage | Out-Null

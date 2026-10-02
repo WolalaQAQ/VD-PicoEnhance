@@ -5,195 +5,133 @@ English | [简体中文](README_zh.md)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 ![Platform: PICO 4 Pro](https://img.shields.io/badge/platform-PICO%204%20Pro-lightgrey)
 
-Bring **PICO optical hand tracking**, **Quest-style hand passthrough** and
-**eye-gaze fixes** to the **unmodified official Virtual Desktop** app
-(`VirtualDesktop.Android`) on **PICO 4 Pro**.
+Brings **PICO optical hand tracking**, **Quest-style hand passthrough** and an **eye-gaze pointer fix** to the **unmodified official** Virtual Desktop (`VirtualDesktop.Android`) on the **PICO 4 Pro**.
 
-VD-PicoEnhance is a Magisk/Zygisk module that injects a small OpenXR
-compatibility layer into the Virtual Desktop process at runtime. The Virtual
-Desktop APK is **not** modified, re-signed, renamed or repacked — the module only
-makes the app use PICO features that the vendor's own loader never asks for.
+VD-PicoEnhance is a Magisk/Zygisk module that injects a small OpenXR compatibility layer into the Virtual Desktop process at runtime. It does not modify, repack, re-sign or rename the Virtual Desktop APK; it only lets the app use PICO features that its bundled loader never asks for.
 
-> ⚠️ **Experimental, root-only and version-specific.** The module hooks a
-> closed-source commercial application. It needs root, and a Virtual Desktop
-> update can break it. Read [Requirements](#requirements),
-> [Known issues](#known-issues) and [Disclaimer](#disclaimer) before installing.
-> This is an independent community project, not affiliated with Virtual Desktop
-> or PICO.
+> Experimental, requires root, and tied to the Virtual Desktop version. The module hooks a closed-source commercial app and may break when Virtual Desktop updates. Read [Requirements](#requirements), [Known issues](#known-issues) and [Disclaimer](#disclaimer) before installing. This is an independent community project, not affiliated with Virtual Desktop or PICO.
 
 ## Features
 
-| Feature | What it does | Toggle (`hand_gesture.txt`) |
+| Feature | How | Switches (`hand_gesture.txt`) |
 |---|---|---|
-| Hand tracking | Makes Virtual Desktop see `XR_EXT_hand_tracking` and injects it into the app's managed extension list | always on |
-| `XR_FB_hand_tracking_aim` | Synthesises pinch / menu gestures and a pointing ray; the runtime's own aim wins when it is valid | `aim_*`, `pinch_*`, `menu_*` |
-| `XR_FB_hand_tracking_mesh` | Serves a hand mesh from `hand_mesh_fb.bin` (shipped in releases, or generated from your own headset) | enabled when the file exists |
-| Hand/controller hot-switch | Put a controller down to switch to hands, pick it up to switch back | — |
-| Hand passthrough (in Virtual Desktop) | One projected layer per hand; restores the background passthrough when paused | `pt_split`, `pt_bg_fix` |
-| Hand passthrough (in SteamVR) | Writes an alpha hole in place on Virtual Desktop's own stream image, only where the hands are — no copy, no extra layer | `pt_hole`, `pt_follow_settings` |
-| Freeze gate | Reports a hand inactive when its joints stop updating (PICO hand "flash") | `hj_freeze_ms` |
-| Eye gaze | One-Euro smoothing, jump confirmation, and compensation for the head pose Virtual Desktop drops on PICO | `gaze_filter`, `gaze_vd_fix` |
+| Hand-tracking extension | Makes Virtual Desktop see `XR_EXT_hand_tracking` and injects the extension into the app's managed extension list | always on |
+| `XR_FB_hand_tracking_aim` | Synthesises pinch, menu gesture and pointing ray; the runtime's own aim is preferred when valid | `aim_*`, `pinch_*`, `menu_*` |
+| `XR_FB_hand_tracking_mesh` | Serves a hand mesh from `hand_mesh_fb.bin` (shipped with releases, or generated from your own headset) | enabled when the file exists |
+| Hand/controller hot-switch | Put the controller down to use hands, pick it up to go back | — |
+| Hand passthrough (in Virtual Desktop) | One projected layer per hand; the background passthrough state is restored when no hole is drawn | `pt_split`, `pt_bg_fix` |
+| Hand passthrough (in SteamVR) | Sets the alpha in place on Virtual Desktop's streamed swapchain, opening a hole only where a hand is; no copy, no extra layer | `pt_hole`, `pt_follow_settings` |
+| Joint freeze gate | Reports a hand as inactive when its joints have not updated for a while, easing the "hand flashes and disappears" behaviour | `hj_freeze_ms` |
+| Eye gaze | One-Euro smoothing with jump confirmation, plus the head-pose fix for the term Virtual Desktop drops on PICO | `gaze_filter`, `gaze_vd_fix` |
 
-In SteamVR a hand-passthrough hole is only opened when Virtual Desktop's own
-`PassthroughPortals` logic would show hand passthrough (VR stream source, VR
-passthrough hands enabled, hands as current input, ...). Outside SteamVR no layer
-is touched.
+In SteamVR the hole follows the same conditions as Virtual Desktop's own `PassthroughPortals` logic (VR stream source, `VRPassthroughHands` enabled, hands as current input, and so on). Outside SteamVR the module does not touch any layer.
 
 ## Requirements
 
-| Component | Requirement |
+| Item | Requirement |
 |---|---|
 | Headset | **PICO 4 Pro**, arm64-v8a |
 | Root | Magisk with **Zygisk enabled** (Zygisk API v5, i.e. Magisk ≥ 27000) |
-| Virtual Desktop | Android build `VirtualDesktop.Android` **1.34.22.0**, unmodified |
-| Host (to build) | Windows + PowerShell, Android **NDK 26.1.10909125**, **CMake 3.22.1**, .NET SDK |
+| Virtual Desktop | Android `VirtualDesktop.Android` **1.34.22.0**, unmodified |
+| PC (build only) | Windows + PowerShell, Android **NDK 26.1.10909125**, **CMake 3.22.1**, .NET SDK |
 
-> Other Virtual Desktop versions are untested. The layer resolves everything
-> through the app's in-memory symbols and the PICO runtime, but internal method
-> names are version-specific.
+Other Virtual Desktop versions are untested. The compatibility layer works through symbols in the app's memory and the PICO runtime's resolution interface, but internal method names are version-specific.
 
 ## How it works
 
-A Zygisk module targets the Virtual Desktop process, stages a native payload
-(`libvdhs.so`) and a managed mod (`VdHsMod.dll`) into the app's private data
-directory, and installs **inline hooks on Virtual Desktop's own bundled OpenXR
-loader**. Through those hooks the layer reaches the PICO runtime, enables the
-PICO hand-tracking extensions, synthesises the FB aim/mesh data, and writes the
-hand-passthrough hole. No system library and no installed file is modified.
+The Zygisk module matches the Virtual Desktop process, stages the native payload `libvdhs.so` and the managed mod `VdHsMod.dll` into the app's private directory, and installs inline hooks on the exports of **Virtual Desktop's own OpenXR loader**. Through those hooks the layer reaches the PICO runtime: it requests the PICO hand-tracking extensions, synthesises FB aim/mesh data and writes the hand-passthrough hole. No system library or installed file is changed.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design, the hook
-list, the managed backends and the robustness contract.
+For the full component breakdown, the hook list, the managed backends and the robustness contract, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
 | `mod/native/` | Native payload `libvdhs.so`: `vdhs_payload.c` (Mono embedding loader), `vdhs_layer.c` (OpenXR hooks, gaze), `vdhs_hand.c` (hand tracking, aim/mesh), `vdhs_pt.c` (SteamVR passthrough hole), `vdhs_mark.c`; vendored `third_party/shadowhook-2.0.1/` |
-| `mod/src/VdHsMod/` | Managed mod (netstandard2.0, reflection only, no Virtual Desktop assembly references) |
+| `mod/src/VdHsMod/` | Managed mod (netstandard2.0, reflection only, no reference to Virtual Desktop assemblies) |
 | `zygisk/` | Magisk/Zygisk module: injector `jni/`, `payload/` (`mode.txt`, `backend.txt`), `build.ps1` |
-| `tools/mesh/` | Convert the headset's own PICO hand mesh into `hand_mesh_fb.bin` |
-| `assets/mesh/` | Prebuilt hand mesh blob shipped in releases, with its provenance and disclaimer |
-| `config/` | Example `hand_gesture.txt` with all runtime toggles |
+| `tools/mesh/` | Converts the headset's own PICO hand mesh into `hand_mesh_fb.bin` |
+| `assets/mesh/` | The hand mesh blob shipped with releases, with provenance and disclaimer |
+| `config/` | `hand_gesture.txt` example with every runtime switch |
 | `docs/` | Architecture notes |
 
-## Build
+## Building
 
-Point `ANDROID_SDK_ROOT` (or `ANDROID_HOME`) at an Android SDK that has NDK
-26.1.10909125 and CMake 3.22.1 installed (or write the path to the untracked
-`tools/sdk-path.txt`), then:
+Point `ANDROID_SDK_ROOT` (or `ANDROID_HOME`) at an Android SDK that has NDK 26.1.10909125 and CMake 3.22.1, or write the SDK path into the untracked `tools/sdk-path.txt`. Then:
 
 ```powershell
-# Native payload + managed mod + Zygisk injector, staged into zygisk/payload/
+# native payload + managed mod + Zygisk injector, staged into zygisk/payload/
 pwsh -File zygisk/build.ps1
 
-# Also produce dist/vdhs_zygisk.zip (the Magisk install package)
+# additionally pack dist/vdhs_zygisk.zip (the Magisk module)
 pwsh -File zygisk/build.ps1 -Pack
 ```
 
-The native payload requires zero warnings; the default managed build restores
-from nothing and compiles offline.
+The native payload must build with zero warnings; the default managed build restores no NuGet packages and compiles offline.
 
-## Install
+## Installation
 
-1. In Magisk: **Modules → Install from storage**, pick `dist/vdhs_zygisk.zip`,
-   then reboot.
-2. The shipped `payload/mode.txt` is `1`, which only proves injection. Confirm
-   the module works, then set
-   `/data/adb/modules/vdhs_zygisk/payload/mode.txt` to `2` and restart Virtual
-   Desktop for the full layer.
-3. To update just the payload later (no full reboot), push and copy
-   `libvdhs.so` into `/data/adb/modules/vdhs_zygisk/payload/`, then restart
-   Virtual Desktop.
+1. In Magisk choose **Modules → Install from storage**, select `vdhs_zygisk.zip`, then reboot the headset.
+2. The shipped `payload/mode.txt` is `1`: an injection smoke test that does not load the managed layer. After confirming the module works, change `/data/adb/modules/vdhs_zygisk/payload/mode.txt` to `2` and restart Virtual Desktop to enable the full compatibility layer.
+3. To update only the payload later, a reboot is not needed: push `libvdhs.so` to `/data/adb/modules/vdhs_zygisk/payload/` and restart Virtual Desktop.
 
-> PICO's gesture mode can block Virtual Desktop's cold start. Put a controller
-> down and wait for `getprop sys.pxr.trackingservice.gesturemode` to read `0`
-> before launching Virtual Desktop.
+> PICO blocks a Virtual Desktop cold start while it is in gesture mode. Pick up the controller, wait until `getprop sys.pxr.trackingservice.gesturemode` returns `0`, then start Virtual Desktop.
 
 ## Configuration
 
-Copy [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) to
-`/data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt` on the headset and
-adjust the keys you need. Every key is optional; missing keys keep their
-built-in default. Current settings and the full key list are in that file.
+Copy [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) to `/data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt` on the headset and adjust it as needed. Every key is optional; a missing key keeps its built-in default. The example lists all key names with the currently recommended values.
 
 ### Hand mesh
 
-The hand mesh (`XR_FB_hand_tracking_mesh`) is served from `hand_mesh_fb.bin`
-placed next to the payload; the mesh extension is simply unavailable until you
-provide it.
+`XR_FB_hand_tracking_mesh` needs `hand_mesh_fb.bin` next to the payload. Without it, that extension is simply not advertised and everything else still works.
 
-- **Prebuilt blob**: releases ship `hand_mesh_fb.bin`, converted from the
-  headset's own PICO system resource (`XRShell.apk`) with
-  `tools/mesh/xrshell_mesh.py`. Push it to
-  `/data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin`. Provenance and
-  disclaimer: [`assets/mesh/README.md`](assets/mesh/README.md).
-- **Build it yourself** (with numpy installed):
+- **Use the blob from a release**: push it to `/data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin`. See [`assets/mesh/README.md`](assets/mesh/README.md) for provenance and disclaimer.
+- **Generate your own** (requires numpy):
 
   ```sh
   python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
   # then push out/hand_mesh_fb.bin to <app_data>/vdhs/hand_mesh_fb.bin
   ```
 
-`hand_mesh_fb.bin` is a PICO system asset, included only to make the
-interoperability feature work and unaffiliated with PICO; it will be removed on
-request.
+`hand_mesh_fb.bin` is extracted from a PICO system resource and is included only so the interoperability feature works out of the box. It is not affiliated with PICO and will be removed on request.
 
 ## Known issues
 
-- **Pinch to switch the main hand in SteamVR does not work.** With the hand
-  open, the trigger reads about 0.27 and never 0; Virtual Desktop only emits a
-  digital click at exactly 1.0. A trigger dead-zone/remap in the managed layer is
-  the likely fix, untested.
-- **Eye gaze** still drifts a little while turning the head.
-- The runtime (or SteamVR) occasionally freezes hand joints for a long time; the
-  hand gesture then "flashes" and disappears until SteamVR is restarted.
-- PICO shows a "hand gestures not supported" prompt in the headset; not handled.
-- Virtual Desktop updates can change internal names and break the layer until
-  it is updated.
+- **Pinch (trigger) as a main-hand switch does not work in SteamVR.** With the hand open the trigger reads about 0.27 and never reaches 0, while Virtual Desktop only emits a digital click at exactly 1.0. A candidate fix is to add a dead zone and remap the trigger in the managed layer; untested.
+- **Eye gaze** still drifts slightly when you turn your head.
+- The runtime (or SteamVR) sometimes freezes the hand joints for a long time; the gesture then "flashes" and disappears. Restarting SteamVR recovers it.
+- The headset shows PICO's "gestures not supported" prompt; not handled for now.
+- A Virtual Desktop update can change internal names and break the layer until it is adapted.
 
-## Uninstall / rollback
+## Uninstall and rollback
 
-- Quick rollback: set `payload/mode.txt` to `1` and restart Virtual Desktop —
-  the layer is skipped entirely.
-- Full removal: disable/remove the module in Magisk and reboot:
+- Quick rollback: set `payload/mode.txt` back to `1` and restart Virtual Desktop; the compatibility layer is skipped entirely.
+- Full removal: disable or remove the module in Magisk and reboot.
+
   ```sh
-  touch /data/adb/modules/vdhs_zygisk/disable   # temporary
+  touch /data/adb/modules/vdhs_zygisk/disable   # disable temporarily
   rm -rf /data/adb/modules/vdhs_zygisk          # remove completely
   ```
-- Optional cleanup of the staged payload: delete
-  `<app_data>/vdhs/` (i.e. `/data/data/VirtualDesktop.Android/vdhs/`).
+
+- Optionally clean the staged payload: delete `<app_data>/vdhs/`, that is `/data/data/VirtualDesktop.Android/vdhs/`.
 
 ## Privacy and security
 
-- The module needs **root** and injects code into Virtual Desktop. Only install
-  it on a device you control, and only from a build you produced or trust.
-- The injector stages files into the app's private data directory and does not
-  write anywhere else. It does not touch the APK, the manifest, the signature or
-  the package name, and does not modify other processes.
-- No Virtual Desktop, PICO, Xenko or Mono binaries are bundled here; see
-  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-- Issue reports: include headset model, PICO OS, Virtual Desktop version and a
-  de-identified log excerpt. Do not upload device identifiers or signing keys.
+- The module needs **root** and injects code into Virtual Desktop. Use it only on your own device and only with a build you made yourself or trust.
+- The injector stages files into the app's private directory and nothing else. It does not change the APK, manifest, signature or package name, and does not touch other processes.
+- This repository bundles no Virtual Desktop, Xenko, Mono or PICO binaries or sources, with the single exception of the hand mesh blob shipped as a separate release asset; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- When opening an issue, include the headset model, PICO OS version, Virtual Desktop version and sanitized log excerpts. Do not upload device identifiers or signing keys.
 
 ## Disclaimer
 
-This is an unofficial, experimental community project. It does not contain,
-redistribute or bypass Virtual Desktop, PICO or their licenses, and it does not
-modify any installed application. Using a root module against a third-party app
-is done **at your own risk**: it may break Virtual Desktop or your device, and
-you are responsible for complying with the terms of the software you own.
-"Virtual Desktop" and "PICO" are the property of their respective owners and are
-referenced here only to describe interoperability.
+This is an unofficial, experimental community project. It does not contain, forward or bypass Virtual Desktop, PICO or their licenses, and it modifies no installed app. Using a root module against a third-party app is at your own risk: it can break Virtual Desktop or the device, and you are responsible for complying with the terms of the software you use. "Virtual Desktop" and "PICO" belong to their respective owners and are used here only to describe interoperability.
 
 ## Acknowledgements
 
-- [ShadowHook](https://github.com/bytedance/android-inline-hook) for the inline
-  hooking runtime.
-- John "topjohnwu" Wu for the Magisk/Zygisk module API.
-- The `hand_mesh_fb.bin` tool build on the PICO system hand mesh, converted with
-  the offline helper in `tools/mesh/`.
+- [ShadowHook](https://github.com/bytedance/android-inline-hook): the inline-hook runtime.
+- John "topjohnwu" Wu: the Magisk / Zygisk module API.
+- `hand_mesh_fb.bin` is derived from the PICO system hand mesh and converted with the offline tooling in `tools/mesh/`.
 
 ## License
 
-[MIT](LICENSE). Third-party components remain under their own licenses; see
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE). Third-party components remain under their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

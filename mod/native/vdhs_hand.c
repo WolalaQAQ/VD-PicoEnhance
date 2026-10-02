@@ -1,4 +1,4 @@
-// VD compat layer, hand tracking part (docs/HAND-VD-COMPAT-LAYER-2026-09-28.md §2.3, §4.3a step 4).
+// VD compat layer, hand tracking part (see docs/ARCHITECTURE.md).
 //
 //   - XR._supportedExtensions injection (plan A): after VD's xrCreateInstance
 //     succeeds, add XR_EXT_hand_tracking / XR_FB_hand_tracking_aim /

@@ -18,8 +18,7 @@ namespace VdHsMod
     ///
     /// Artifact: <c>&lt;payload&gt;/Xenko.OpenXR.patched.dll</c>, produced from the
     /// Track R pipeline (patch_handswitch8/9.cs) PLUS an MVID bump so the
-    /// official libaot-Xenko.OpenXR.dll.so no longer matches. See
-    /// docs/HAND-VD-ZYGISK-2026-09-28.md.
+    /// official libaot-Xenko.OpenXR.dll.so no longer matches.
     /// </summary>
     internal sealed class RedirectBackend : IHotSwitchBackend
     {

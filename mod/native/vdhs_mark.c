@@ -1,4 +1,4 @@
-// Canonical source: VD-PicoHands/mod/native/vdhs_mark.c
+// Canonical source: VD-PicoEnhance/mod/native/vdhs_mark.c
 //
 // Mirrors what PICO's libpico_openxr_loader.so does after loading the runtime:
 //   runtime_gipa(XR_NULL_HANDLE, "xrMarkApiClass", &fn); fn(mask);
@@ -157,7 +157,7 @@ int vdhs_mark(const void* loaderInitInfo, uint64_t mask) {
 // Track Z: the runtime has already been initialised by VD's xrInitializeLoaderKHR.
 // Negotiate only, then mark. Safe to call repeatedly; the mark is an OR of bits.
 // Called by the compat layer (vdhs_layer.c) on VD's own thread, so negotiate
-// sees a JVM-attached thread with the app classloader (HANDOFF-2 §3 #12).
+// sees a JVM-attached thread with the app classloader.
 int vdhs_mark_now(void);
 void* vdhs_runtime_gipa(void);
 static int mark_now(void) {
@@ -177,14 +177,14 @@ void* vdhs_runtime_gipa(void) { return ensure_runtime() == 0 ? (void*)g_gipa : 0
 void vdhs_runtime_reset(void) { g_gipa = 0; }
 
 // Managed entry (NativeBridge.MarkLoaded). The deferred background mark thread
-// (mark_waiter) is gone: it SIGABRTed ~1/5 runs (HANDOFF-2 §3 #12). With the
+// (mark_waiter) is gone: it SIGABRTed ~1/5 runs. With the
 // compat layer the mark happens inside the enumerate hook on VD's thread, so
 // this only tries once and never spawns a thread.
 // Returns 0 when marked, -1 when the runtime is not up yet, <0 on error.
 extern int vdhs_layer_active(void) __attribute__((weak));   // Track Z only
 int vdhs_mark_loaded(void) {
     // With the layer's hooks in place the mark is done on VD's thread; a second
-    // negotiate from the managed payload thread is exactly the §3 #12 risk.
+    // negotiate from the managed payload thread is exactly that risk.
     if (vdhs_layer_active && vdhs_layer_active()) { LOGI("mark_loaded: skipped (compat layer active)"); return 0; }
     return mark_now();
 }

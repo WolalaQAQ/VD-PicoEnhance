@@ -4,6 +4,5 @@
 #
 # Shipped default is 1 on purpose: the very first boot after installing this
 # module should only prove injection, never touch the managed runtime yet.
-# Per the handoff doc (docs/HAND-VD-ZYGISK-2026-09-28.md §8): run V2 with 1,
-# then change this to 2 and reboot for V3 (managed load) and everything after.
+# Run this mode first, then change the value to 2 and reboot to load the layer.
 1

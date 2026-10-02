@@ -1,4 +1,4 @@
-// VD compat layer (docs/HAND-VD-COMPAT-LAYER-2026-09-28.md §1, §2.1).
+// VD compat layer (see docs/ARCHITECTURE.md).
 //
 // Layer-shaped (hooked entry points + GIPA wrapper table), but installed as
 // ShadowHook inline hooks on the exports of VD's OWN bundled Khronos loader
