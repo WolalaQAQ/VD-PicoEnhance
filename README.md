@@ -11,6 +11,14 @@ VD-PicoEnhance is a Magisk/Zygisk module that injects a small OpenXR compatibili
 
 > Experimental, requires root, and tied to the Virtual Desktop version. The module hooks a closed-source commercial app and may break when Virtual Desktop updates. Read [Requirements](#requirements), [Known issues](#known-issues) and [Disclaimer](#disclaimer) before installing. This is an independent community project, not affiliated with Virtual Desktop or PICO.
 
+## v1.0.4 update
+
+- **Fix foveated-streaming offsets and added latency**: gaze smoothing and head-pose compensation now apply only to the UI pointer. Streaming and tracking forwarding retain upstream gaze data. Pointer head-pose compensation is enabled by default (`gaze_vd_fix=1`).
+- **Fix startup and installation issues**: correct an extension-list overflow, first-install directory permissions, partial hook installation and stale payloads. Failed installation steps now stop with an error.
+- **Fix hand rays and pinch configuration**: use a synthesised ray when the runtime ray is invalid, and validate pinch thresholds before applying them.
+
+The fixes passed one on-device functional observation on PICO 4 Pro / VD 1.34.22.0 covering hand/controller switching, pinch and ray recovery, both-hand passthrough, gaze and app restart, with head-pose compensation enabled. Install the full module and reboot to upgrade. An existing explicit `gaze_vd_fix=0` still takes precedence; change it to `1` or remove the line to enable compensation. See the [changelog](CHANGELOG.md) for details.
+
 ## Features
 
 | Feature | How | Switches (`hand_gesture.txt`) |
@@ -22,7 +30,7 @@ VD-PicoEnhance is a Magisk/Zygisk module that injects a small OpenXR compatibili
 | Hand passthrough (in Virtual Desktop) | One projected layer per hand; the background passthrough state is restored when no hole is drawn | `pt_split`, `pt_bg_fix` |
 | Hand passthrough (in SteamVR) | Sets the alpha in place on Virtual Desktop's streamed swapchain, opening a hole only where a hand is; no copy, no extra layer | `pt_hole`, `pt_follow_settings` |
 | Joint freeze gate | Reports a hand as inactive when its joints have not updated for a while, easing the "hand flashes and disappears" behaviour | `hj_freeze_ms` |
-| Eye gaze | One-Euro smoothing with jump confirmation, plus the head-pose fix for the term Virtual Desktop drops on PICO | `gaze_filter`, `gaze_vd_fix` |
+| Eye gaze | Pointer-only One-Euro smoothing, jump confirmation and head-pose compensation, enabled by default; streaming gaze passes through | `gaze_filter`, `gaze_vd_fix` |
 
 In SteamVR the hole follows the same conditions as Virtual Desktop's own `PassthroughPortals` logic (VR stream source, `VRPassthroughHands` enabled, hands as current input, and so on). Outside SteamVR the module does not touch any layer.
 
@@ -86,17 +94,19 @@ Useful parameters: `-Mode 1` for an injection-only control run, `-NoReboot` to s
 ### Manual installation
 
 1. In Magisk choose **Modules → Install from storage**, select `vdhs_zygisk.zip`, then reboot the headset.
-2. After the reboot the full compatibility layer is active; start Virtual Desktop and hand tracking, passthrough and the eye-gaze fix are available.
+2. Launch Virtual Desktop once, install `hand_mesh_fb.bin` as described under [Hand mesh](#hand-mesh), then restart the app. The one-shot installer includes mesh installation.
 
 `payload/mode.txt` defaults to `2`, the full layer. For a control run that only injects and does not load the managed layer, change `/data/adb/modules/vdhs_zygisk/payload/mode.txt` to `1` and restart Virtual Desktop.
 
-To update only the payload later, a reboot is not needed: push `libvdhs.so` to `/data/adb/modules/vdhs_zygisk/payload/` and restart Virtual Desktop.
+To update only the payload later, a reboot is not needed: push `libvdhs.so` to `/data/adb/modules/vdhs_zygisk/payload/` and restart Virtual Desktop. v1.0.4 also updates the injector, so upgrading to this version requires the full ZIP and a headset reboot.
 
 > PICO blocks a Virtual Desktop cold start while it is in gesture mode. Pick up the controller, wait until `getprop sys.pxr.trackingservice.gesturemode` returns `0`, then start Virtual Desktop.
 
 ## Configuration
 
 Copy [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) to `/data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt` on the headset and adjust it as needed. Every key is optional; a missing key keeps its built-in default. The example lists all key names with the currently recommended values.
+
+For SteamVR hand passthrough, set `pt_hole=1` and enable VD's VR hand-passthrough setting. In v1.0.4, UI gaze smoothing and head-pose compensation are enabled by default; explicit values in an existing configuration override the defaults. Restart VD after saving changes.
 
 ### Hand mesh
 
@@ -106,15 +116,30 @@ Copy [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) to `/d
 /data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin
 ```
 
-Without it, that extension is simply not advertised and everything else still works. The directory already exists once the module has run.
+Without this file, the module does not enable VD's hand-mesh feature. The directory already exists once the module has run.
 
-**Use the blob from a release (recommended).** On a PC with rooted adb:
+**Use the blob from a release (recommended).** The one-shot installer places it automatically. For manual installation, run on the PC:
 
 ```sh
 adb push hand_mesh_fb.bin /data/local/tmp/
-adb shell su -c 'd=/data/data/VirtualDesktop.Android; mkdir -p $d/vdhs'
-adb shell su -c 'cp /data/local/tmp/hand_mesh_fb.bin /data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin'
-adb shell su -c 'd=/data/data/VirtualDesktop.Android; chown $(stat -c %u:%g $d) $d/vdhs/hand_mesh_fb.bin; chmod 0644 $d/vdhs/hand_mesh_fb.bin'
+adb shell
+```
+
+In the device shell, enter `su` to obtain root, then run:
+
+```sh
+set -e
+d=/data/data/VirtualDesktop.Android
+owner=$(stat -c %u:%g "$d")
+mkdir -p "$d/vdhs"
+chown "$owner" "$d/vdhs"
+chmod 0700 "$d/vdhs"
+cp /data/local/tmp/hand_mesh_fb.bin "$d/vdhs/hand_mesh_fb.bin"
+chown "$owner" "$d/vdhs/hand_mesh_fb.bin"
+chmod 0644 "$d/vdhs/hand_mesh_fb.bin"
+restorecon -RFD "$d/vdhs"
+exit
+exit
 ```
 
 Restart Virtual Desktop afterwards. You can also copy it there with a root file manager on the headset.
@@ -135,6 +160,11 @@ Provenance and disclaimer: [`assets/mesh/README.md`](assets/mesh/README.md).
 - The runtime (or SteamVR) sometimes freezes the hand joints for a long time; the gesture then "flashes" and disappears. Restarting SteamVR recovers it.
 - The headset shows PICO's "gestures not supported" prompt; not handled for now.
 - A Virtual Desktop update can change internal names and break the layer until it is adapted.
+
+## TODO
+
+- [ ] **USB wired streaming**: Virtual Desktop 1.34.22 supports wired streaming over USB NCM, but PICO does not currently expose that link to apps, so the app's USB mode is unavailable there. The plan is to bring up a USB network interface on the headset and let the compatibility layer use it, validating the link and discovery on-device before deciding whether to ship it.
+- [ ] **Controller battery level**: pass the PICO controller battery level through to SteamVR, so the remaining charge is visible in SteamVR and in games.
 
 ## Uninstall and rollback
 

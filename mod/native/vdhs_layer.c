@@ -97,7 +97,10 @@ static PFN_create_action   g_orig_create_action;
 static PFN_get_pose        g_orig_get_pose;
 static PFN_get_system_props g_orig_get_system_props;
 
-static volatile int g_hooks_ok;
+// Publish the hook group only after every required trampoline is available.
+// Callbacks remain transparent during installation and after a failed rollback.
+static int g_hooks_ok;
+static int g_layer_started;
 static volatile int g_marked;
 static volatile XrInstance g_instance;
 static int64_t g_t0;
@@ -507,7 +510,8 @@ static gipa_entry g_gipa_table[] = {
 
 #define TS() ((long long)(now_ms() - g_t0))
 
-int vdhs_layer_active(void) { return g_hooks_ok; }
+int vdhs_layer_active(void) { return __atomic_load_n(&g_hooks_ok, __ATOMIC_ACQUIRE); }
+int vdhs_layer_started(void) { return __atomic_load_n(&g_layer_started, __ATOMIC_ACQUIRE); }
 int vdhs_layer_marked(void) { return g_marked; }
 
 // Mark on the calling (VD) thread; the runtime must already be loaded.
@@ -524,6 +528,7 @@ static void try_mark(const char* where) {
 
 // ---------------------------------------------------------------- hooks
 static XrResult hk_enum(const char* layer, uint32_t cap, uint32_t* count, XrExtensionProperties* props) {
+    if (!vdhs_layer_active()) return g_orig_enum(layer, cap, count, props);
     static int logged;
     if (!g_marked && !layer) {
         // Force the loader to load the runtime (it does so lazily on the first
@@ -564,11 +569,13 @@ static int is_layer_ext(const char* s) {
 }
 
 static XrResult hk_create_instance(const XrInstanceCreateInfo* ci, XrInstance* out) {
+    if (!vdhs_layer_active()) return g_orig_create_instance(ci, out);
     try_mark("createInstance");   // no-op when enumerate already marked
     if (!ci) return g_orig_create_instance(ci, out);
 
     uint32_t n = ci->enabledExtensionCount;
-    const char** names = (const char**)calloc((size_t)n + 1, sizeof *names);
+    // Neither the hand nor controller extension need be present in VD's list.
+    const char** names = (const char**)calloc((size_t)n + 2, sizeof *names);
     if (!names) return g_orig_create_instance(ci, out);
     uint32_t m = 0;
     int has_ctrl = 0, stripped = 0;
@@ -618,7 +625,13 @@ static XrResult hk_create_instance(const XrInstanceCreateInfo* ci, XrInstance* o
         r = g_orig_create_instance(&copy, out);
         LOGE("createInstance: hand ext rejected; VD list only r=%d", r);
     }
-    if (r == 0 && out) g_instance = *out;
+    if (r == 0 && out) {
+        // A fallback retry may have invalidated the cached runtime interface.
+        // Refresh it on VD's thread before the managed input probe can run;
+        // that background thread must never negotiate a runtime itself.
+        vdhs_runtime_gipa();
+        g_instance = *out;
+    }
     LOGI("createInstance: final r=%d instance=0x%llx hand_ext=%d", r,
          (unsigned long long)(r == 0 && out ? *out : 0), has_hand || hand_added);
     free(names);
@@ -641,6 +654,7 @@ static XrResult hk_create_instance(const XrInstanceCreateInfo* ci, XrInstance* o
 }
 
 static XrResult hk_gipa(XrInstance inst, const char* name, PFN_xrVoidFunction* fn) {
+    if (!vdhs_layer_active()) return g_orig_gipa(inst, name, fn);
     // Functions the layer implements itself: the runtime would answer
     // FUNCTION_UNSUPPORTED and VD's GetDelegate CheckError()s (XR.cs:641-649).
     if (inst && name && fn && vdhs_hand_gipa_self(name, fn)) return 0;
@@ -662,6 +676,7 @@ static XrResult hk_gipa(XrInstance inst, const char* name, PFN_xrVoidFunction* f
 typedef struct XrBaseOutStructure { uint32_t type; void* next; } XrBaseOutStructure;
 typedef struct { uint32_t type; void* next; XrBool32 supportsHandTracking; } XrSystemHandTrackingPropertiesEXT;
 static XrResult hk_get_system_props(XrInstance inst, uint64_t sys, XrBaseOutStructure* props) {
+    if (!vdhs_layer_active()) return g_orig_get_system_props(inst, sys, props);
     XrResult r = g_orig_get_system_props(inst, sys, props);
     for (XrBaseOutStructure* s = props ? (XrBaseOutStructure*)props->next : NULL; s; s = (XrBaseOutStructure*)s->next) {
         if (s->type == 1000051000u)        // XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT
@@ -678,6 +693,7 @@ typedef XrResult (*PFN_end_frame)(XrSession, const XrFrameEndInfo*);
 static PFN_end_frame g_orig_end_frame;
 
 static XrResult hk_end_frame(XrSession s, const XrFrameEndInfo* fi_vd) {
+    if (!vdhs_layer_active()) return g_orig_end_frame(s, fi_vd);
     // Extra projected layers (second hand) are submitted right after VD's.
     XrFrameEndInfo fi_copy;
     const XrFrameEndInfo* fi = fi_vd;
@@ -741,6 +757,7 @@ typedef struct { uint32_t type; const void* next; uint64_t flags; } XrEventDataP
 typedef XrResult (*PFN_poll_event)(XrInstance, XrBaseOutStructure*);
 static PFN_poll_event g_orig_poll_event;
 static XrResult hk_poll_event(XrInstance inst, XrBaseOutStructure* ev) {
+    if (!vdhs_layer_active()) return g_orig_poll_event(inst, ev);
     XrResult r = g_orig_poll_event(inst, ev);
     // Session state (XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED): hand joints
     // freeze while the session is not FOCUSED (s10-hmd-fix2), log to confirm.
@@ -754,9 +771,8 @@ static XrResult hk_poll_event(XrInstance inst, XrBaseOutStructure* ev) {
     return r;
 }
 
-// Log-only: EyeGazeSpace = action space of VD's "eye_gaze_pose"
-// action (XR.cs:748, Session.cs:968). xrLocateSpace results for it are logged
-// ~2 Hz with the angle change since the previous logged sample.
+// EyeGazeSpace = action space of VD's "eye_gaze_pose" action. Only verified
+// pointer consumers receive the optional smoothing / coordinate compensation.
 static volatile XrAction g_gaze_action;
 static volatile XrHandle g_gaze_space, g_gaze_session;
 typedef struct { uint32_t type; const void* next; XrAction action; XrPath subactionPath; XrPosef poseInActionSpace; } XrActionSpaceCreateInfo;
@@ -767,6 +783,7 @@ static PFN_create_action_space g_orig_create_action_space;
 static PFN_locate_space g_orig_locate_space;
 
 static XrResult hk_create_action_space(XrSession s, const XrActionSpaceCreateInfo* ci, XrHandle* out) {
+    if (!vdhs_layer_active()) return g_orig_create_action_space(s, ci, out);
     XrResult r = g_orig_create_action_space(s, ci, out);
     if (r == 0 && ci && out && g_gaze_action && ci->action == g_gaze_action) {
         g_gaze_space = *out;
@@ -776,12 +793,14 @@ static XrResult hk_create_action_space(XrSession s, const XrActionSpaceCreateInf
     return r;
 }
 
-// Eye gaze stabiliser (hand_gesture.txt gaze_filter, default 1).
-// PICO's gaze_ext pose is the raw combined gaze (no smoothing in runtime or
-// client) as head pose ∘ gaze. The gaze direction is taken relative to the head
+// Pointer-only stabiliser (hand_gesture.txt gaze_filter, default 1).
+// This is the mod's additional filter, not a runtime or VD filter. The upstream
+// gaze pose is head pose ∘ gaze. The direction is taken relative to the head
 // (VIEW space at the same time and base), One-Euro filtered there, and
 // recomposed with the current head so head motion is not delayed. An invalid
 // sample within gaze_hold_ms of the last valid one returns the held direction.
+// Streaming must bypass this entire path: smoothing, jump confirmation and
+// invalid-sample holds can all delay a foveated region after an eye movement.
 typedef struct { uint32_t type; const void* next; int32_t referenceSpaceType; XrPosef poseInReferenceSpace; } XrRefSpaceCI;
 typedef XrResult (*PFN_create_ref_space)(XrSession, const XrRefSpaceCI*, XrHandle*);
 
@@ -833,7 +852,10 @@ static XrVector3f euro3_step(euro3* f, XrVector3f v, float dt, float mincutoff, 
     return f->x;
 }
 
-static struct {
+// VD queries gaze on both the render thread and EyeData Loop, with different
+// predicted times. Neither the filter history nor its helper spaces/log counters
+// may be shared unsynchronised between these callers.
+static _Thread_local struct {
     XrHandle view_session, view_space;
     PFN_create_ref_space create_ref_space;
     euro3 f;
@@ -854,6 +876,9 @@ static int gaze_head(XrHandle base, int64_t time, XrPosef* head) {
         if (!GZ.create_ref_space) return 0;
     }
     if (GZ.view_session != s) {
+        PFN_create_ref_space create = GZ.create_ref_space;
+        memset(&GZ, 0, sizeof GZ);
+        GZ.create_ref_space = create;
         XrRefSpaceCI ci;
         memset(&ci, 0, sizeof ci);
         ci.type = 37;                     // XR_TYPE_REFERENCE_SPACE_CREATE_INFO
@@ -874,9 +899,9 @@ static int gaze_head(XrHandle base, int64_t time, XrPosef* head) {
     return 1;
 }
 
-static void gaze_filter(XrHandle base, int64_t time, XrSpaceLocation* loc) {
+static int gaze_filter(XrHandle base, int64_t time, XrSpaceLocation* loc) {
     XrPosef head;
-    if (!gaze_head(base, time, &head)) return;
+    if (!gaze_head(base, time, &head)) return 0;
     int64_t t = now_ms();
     int valid = (loc->locationFlags & 0x3) == 0x3;
     XrVector3f d = { 0, 0, 0 };
@@ -916,14 +941,106 @@ static void gaze_filter(XrHandle base, int64_t time, XrSpaceLocation* loc) {
     } else if (GZ.have_out && t - GZ.last_valid_ms <= (int64_t)vdhs_hand_cfg("gaze_hold_ms")) {
         GZ.held++;
     } else {
-        return;   // leave the runtime's (invalid) result
+        return 0;   // leave the runtime's (invalid) result
     }
     loc->pose.orientation = gq_mul(head.orientation, gq_from_fwd(GZ.out_dir));
     if (!(loc->locationFlags & 0x3)) loc->pose.position = head.position;
     loc->locationFlags |= 0xf;
+    return 1;
 }
 
-// gaze_vd_fix (default 0, A/B only). On PICO VD computes
+// Both callers use the SAME EyeGazeSpace/StageSpace pair on PICO:
+//   OpenXRHMD.Update -> TryGetEyeGazePose(useHeadSpace:false): world pointer
+//   OpenXRHMD.GetEyeState -> TryGetEyeGazePose(useHeadSpace:true): streaming
+// A thread ID, base space or timestamp cannot distinguish these uses (tracking
+// forwarding also calls GetEyeState on the render thread). Inspect only the
+// immediate managed consumer of TryGetEyeGazePose. Unknown call chains, including
+// a missing/inlined TryGetEyeGazePose frame, bypass BOTH filtering and
+// compensation. The supported VD build calls GetEyeState from Game, separately
+// from OpenXRHMD.Update; neither of those streaming callers is whitelisted.
+// Mono's public no-IL walker supports the app's AOT frames; no managed code is
+// patched and no managed object references are retained.
+enum { GAZE_CALLER_UNKNOWN, GAZE_CALLER_POINTER, GAZE_CALLER_HEAD };
+typedef int (*GazeStackWalk)(void*, int, int, int, void*);
+static struct {
+    void (*stack_walk_no_il)(GazeStackWalk, void*);
+    void* (*method_get_class)(void*);
+    const char* (*method_get_name)(void*);
+    void* (*class_get_image)(void*);
+    const char* (*class_get_name)(void*);
+    const char* (*class_get_namespace)(void*);
+    const char* (*image_get_name)(void*);
+} GM;
+static pthread_once_t g_gaze_mono_once = PTHREAD_ONCE_INIT;
+static int g_gaze_mono_ready;
+
+static void gaze_mono_init(void) {
+    static const char* const names[] = {
+        "mono_stack_walk_no_il", "mono_method_get_class", "mono_method_get_name",
+        "mono_class_get_image", "mono_class_get_name", "mono_class_get_namespace", "mono_image_get_name",
+    };
+    _Static_assert(sizeof names / sizeof names[0] == sizeof GM / sizeof(void*), "GM slots vs names");
+    void** slots = (void**)&GM;
+    int ok = 1;
+    for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
+        slots[i] = vdhs_resolve_mapped_symbol("libmonosgen-2.0.so", names[i]);
+        if (!slots[i]) ok = 0;
+    }
+    g_gaze_mono_ready = ok;
+    LOGI("gaze: pointer caller guard %s", ok ? "ready" : "unavailable; filter and compensation disabled");
+}
+
+typedef struct { int frames, saw_query, caller; } GazeCallerWalk;
+static int gaze_caller_frame(void* method, int native_offset, int il_offset, int managed, void* user) {
+    GazeCallerWalk* w = (GazeCallerWalk*)user;
+    if (++w->frames > 12) return 1;
+    if (!managed) return 0;   // skip P/Invoke wrappers
+    if (!method) return 1;    // do not search through unknown managed frames
+    void* klass = GM.method_get_class(method);
+    void* image = klass ? GM.class_get_image(klass) : NULL;
+    const char* mn = GM.method_get_name(method);
+    const char* kn = klass ? GM.class_get_name(klass) : NULL;
+    const char* ns = klass ? GM.class_get_namespace(klass) : NULL;
+    const char* im = image ? GM.image_get_name(image) : NULL;
+    if (!mn || !kn || !ns || !im) return 1;
+
+    if (!w->saw_query && !strcmp(im, "Xenko.OpenXR") && !strcmp(ns, "Xenko.OpenXR") &&
+        !strcmp(kn, "Session") && !strcmp(mn, "TryGetEyeGazePose")) {
+        w->saw_query = 1;
+        return 0;
+    }
+    if (!strcmp(im, "Xenko.VR") && !strcmp(ns, "Xenko.VR") && !strcmp(kn, "OpenXRHMD")) {
+        if (!strcmp(mn, "GetEyeState")) w->caller = GAZE_CALLER_HEAD;
+        else if (w->saw_query && !strcmp(mn, "Update")) w->caller = GAZE_CALLER_POINTER;
+    }
+    // Never search past an unrecognised managed consumer for an older Update
+    // frame: that could misclassify a nested streaming request as a pointer.
+    return 1;
+}
+
+static int gaze_caller(void) {
+    pthread_once(&g_gaze_mono_once, gaze_mono_init);
+    if (!g_gaze_mono_ready) return GAZE_CALLER_UNKNOWN;
+    GazeCallerWalk w = { 0, 0, GAZE_CALLER_UNKNOWN };
+    GM.stack_walk_no_il(gaze_caller_frame, &w);
+    return w.caller;
+}
+
+static const char* gaze_caller_name(int caller) {
+    static const char* const names[] = { "unknown", "pointer", "head-relative" };
+    return names[caller];
+}
+
+static void gaze_log_route(int caller, int filtered, int fixed) {
+    // Once per route/result on each thread, even when verbose gaze logs are off.
+    static _Thread_local unsigned reported;
+    unsigned bit = 1u << (caller * 4 + filtered * 2 + fixed);
+    if (reported & bit) return;
+    reported |= bit;
+    LOGI("gaze: caller=%s filter_applied=%d vd_fix_applied=%d", gaze_caller_name(caller), filtered, fixed);
+}
+
+// gaze_vd_fix (default 1), POINTER CALLS ONLY. On PICO VD computes
 // Pose.Multiply(locate(Gaze,Stage), locate(Stage,Head)) = head-relative gaze
 // (Session.cs:1446-1452) and uses it directly as a ray in its world
 // (CurrentSpace = LOCAL, TouchInjector.cs:288-290), which drops the head pose.
@@ -937,24 +1054,24 @@ static XrPosef gpose_mul(XrPosef a, XrPosef b) {   // a ∘ b
     r.position.x = a.position.x + t.x; r.position.y = a.position.y + t.y; r.position.z = a.position.z + t.z;
     return r;
 }
-static XrHandle g_local_space, g_local_session;
-static void gaze_vd_fix(XrHandle base, int64_t time, XrSpaceLocation* loc) {
-    if ((loc->locationFlags & 0x3) != 0x3) return;
+static _Thread_local XrHandle g_local_space, g_local_session;
+static int gaze_vd_fix(XrHandle base, int64_t time, XrSpaceLocation* loc) {
+    if ((loc->locationFlags & 0x3) != 0x3) return 0;
     // VD's world is Session.CurrentSpace (LOCAL, or STAGE with StageTracking),
     // taken from its projection layer. VD multiplies by head_from_stage in
     // either case, so the head term is needed even when world == base.
     XrHandle world = (XrHandle)vdhs_pt_current_space();
     XrPosef head;
-    if (!gaze_head(base, time, &head)) return;
+    if (!gaze_head(base, time, &head)) return 0;
     XrHandle s = g_gaze_session;
-    if (world == base) { loc->pose = gpose_mul(head, loc->pose); return; }
+    if (world == base) { loc->pose = gpose_mul(head, loc->pose); return 1; }
     if (world) {
         XrSpaceLocation sw;
         memset(&sw, 0, sizeof sw);
         sw.type = 42;
-        if (g_orig_locate_space(base, world, time, &sw) != 0 || (sw.locationFlags & 0x3) != 0x3) return;
+        if (g_orig_locate_space(base, world, time, &sw) != 0 || (sw.locationFlags & 0x3) != 0x3) return 0;
         loc->pose = gpose_mul(head, gpose_mul(sw.pose, loc->pose));
-        return;
+        return 1;
     }
     if (g_local_session != s) {
         XrRefSpaceCI ci;
@@ -968,20 +1085,23 @@ static void gaze_vd_fix(XrHandle base, int64_t time, XrSpaceLocation* loc) {
         g_local_session = s;
         g_local_space = r == 0 ? sp : 0;
     }
-    if (!g_local_space) return;
+    if (!g_local_space) return 0;
     XrSpaceLocation sl;   // base (Stage) in LOCAL
     memset(&sl, 0, sizeof sl);
     sl.type = 42;
-    if (g_orig_locate_space(base, g_local_space, time, &sl) != 0 || (sl.locationFlags & 0x3) != 0x3) return;
+    if (g_orig_locate_space(base, g_local_space, time, &sl) != 0 || (sl.locationFlags & 0x3) != 0x3) return 0;
     loc->pose = gpose_mul(head, gpose_mul(sl.pose, loc->pose));
+    return 1;
 }
 
+// Pointer diagnostic only; this observes the filtered pose BEFORE compensation.
+// Streaming takes the early-return branch without these extra space queries.
 static void gaze_log_sample(XrHandle base, int64_t time, const XrSpaceLocation* loc, uint64_t raw_flags,
                             XrQuaternionf raw_q) {
-    static int64_t last_ms;
-    static unsigned calls, invalid;
-    static XrQuaternionf last_raw, last_out;
-    static int64_t last_time;
+    static _Thread_local int64_t last_ms;
+    static _Thread_local unsigned calls, invalid;
+    static _Thread_local XrQuaternionf last_raw, last_out;
+    static _Thread_local int64_t last_time;
     calls++;
     if ((raw_flags & 0x3) != 0x3) invalid++;
     int64_t t = now_ms();
@@ -1011,7 +1131,7 @@ static void gaze_log_sample(XrHandle base, int64_t time, const XrSpaceLocation* 
             vp = asinf(vf.y > 1 ? 1 : vf.y < -1 ? -1 : vf.y) * 57.29578f;
         }
     }
-    LOGI("gaze: locate base=0x%llx raw_flags=0x%llx out_flags=0x%llx p=(%.3f,%.3f,%.3f) fwd=(%.3f,%.3f,%.3f) "
+    LOGI("gaze: caller=pointer locate base=0x%llx raw_flags=0x%llx out_flags=0x%llx p=(%.3f,%.3f,%.3f) fwd=(%.3f,%.3f,%.3f) "
          "dAng raw=%.1f out=%.1fdeg/%lldms dt_xr=%.1fms calls=%u invalid=%u held=%u rejected=%u "
          "pitch gaze=%.1f head=%.1f rel=%.1f vd=%.1f vd_fwd=(%.3f,%.3f,%.3f)",
          (unsigned long long)base, (unsigned long long)raw_flags, (unsigned long long)loc->locationFlags,
@@ -1024,24 +1144,36 @@ static void gaze_log_sample(XrHandle base, int64_t time, const XrSpaceLocation* 
 }
 
 static XrResult hk_locate_space(XrHandle space, XrHandle base, int64_t time, XrSpaceLocation* loc) {
+    if (!vdhs_layer_active()) return g_orig_locate_space(space, base, time, loc);
     XrResult r = g_orig_locate_space(space, base, time, loc);
     if (!g_gaze_space || space != g_gaze_space || !loc || r != 0) return r;
-    static int enabled = -1, filter = -1, vdfix = -1;
+    static _Thread_local int enabled = -1, filter = -1, vdfix = -1;
     if (enabled < 0) {
         enabled = vdhs_hand_cfg("gaze_log") > 0;
         filter = vdhs_hand_cfg("gaze_filter") > 0;
         vdfix = vdhs_hand_cfg("gaze_vd_fix") > 0;
         LOGI("gaze: log=%d filter=%d vd_fix=%d", enabled, filter, vdfix);
     }
+    if (!enabled && !filter && !vdfix) return r;
+    // Classify before touching the pose or filter history. GetEyeState (including
+    // render-thread tracking forwarding) and unknown consumers keep the complete
+    // upstream location, including its original validity/tracking flags.
+    int caller = gaze_caller();
+    if (caller != GAZE_CALLER_POINTER) {
+        gaze_log_route(caller, 0, 0);
+        return r;
+    }
     const uint64_t raw_flags = loc->locationFlags;
     const XrQuaternionf raw_q = loc->pose.orientation;
-    if (filter) gaze_filter(base, time, loc);
+    int filtered = filter && gaze_filter(base, time, loc);
     if (enabled) gaze_log_sample(base, time, loc, raw_flags, raw_q);
-    if (vdfix) gaze_vd_fix(base, time, loc);
+    int fixed = vdfix && gaze_vd_fix(base, time, loc);
+    gaze_log_route(caller, filtered, fixed);
     return r;
 }
 
 static XrResult hk_create_action(XrActionSet set, const XrActionCreateInfo* ci, XrAction* out) {
+    if (!vdhs_layer_active()) return g_orig_create_action(set, ci, out);
     XrResult r = g_orig_create_action(set, ci, out);
     if (r == 0 && ci && out && !strcmp(ci->actionName, "eye_gaze_pose")) {
         g_gaze_action = *out;
@@ -1088,6 +1220,7 @@ static int active_input_cached(void) {
 }
 
 static XrResult hk_get_pose(XrSession s, const XrActionStateGetInfo* gi, XrActionStatePose* st) {
+    if (!vdhs_layer_active()) return g_orig_get_pose(s, gi, st);
     XrResult r = g_orig_get_pose(s, gi, st);
     if (r == 0 && gi && st && st->isActive && is_grip(gi->action) && active_input_cached() == 2)
         st->isActive = 0;
@@ -1127,18 +1260,24 @@ static int install_hooks(uintptr_t base) {
         LOGI("install: %s @ +0x%lx%s", specs[i].name, (unsigned long)off,
              specs[i].expect_off && off != specs[i].expect_off ? " (offset differs from 1.34.22)" : "");
     }
-    int ok = 0;
+    void* stubs[N] = { 0 };
     for (int i = 0; i < N; i++) {
-        void* stub = shadowhook_hook_func_addr(addr[i], specs[i].hook, specs[i].orig);
-        if (!stub) {
+        stubs[i] = shadowhook_hook_func_addr(addr[i], specs[i].hook, specs[i].orig);
+        if (!stubs[i]) {
             int e = shadowhook_get_errno();
             LOGE("install: hook %s failed: %d %s", specs[i].name, e, shadowhook_to_errmsg(e));
-            continue;
+            for (int j = i - 1; j >= 0; j--) {
+                int urc = shadowhook_unhook(stubs[j]);
+                if (urc != 0) LOGE("install: rollback %s failed: %d", specs[j].name, urc);
+            }
+            // Keep orig slots intact for callbacks already in flight (or a hook
+            // that could not be removed). The group stays disabled in both cases.
+            return -2;
         }
-        ok++;
     }
-    vdhs_pt_install(base);   // swapchain hooks for pt_hole / pt_alpha_only (non-fatal)
-    return ok == N ? 0 : -2;
+    if (vdhs_pt_install(base) != 0) LOGE("install: alpha-hole hooks disabled");
+    __atomic_store_n(&g_hooks_ok, 1, __ATOMIC_RELEASE);
+    return 0;
 }
 
 static void* layer_thread(void* arg) {
@@ -1159,15 +1298,12 @@ static void* layer_thread(void* arg) {
     LOGI("loader mapped at %p (+%lld ms)", (void*)base, TS());
 
     rc = install_hooks(base);
-    if (rc == 0) g_hooks_ok = 1;
-    LOGI("hooks %s (+%lld ms)", rc == 0 ? "installed" : "INCOMPLETE", TS());
+    LOGI("hooks %s (+%lld ms)", rc == 0 ? "installed" : "DISABLED", TS());
     return NULL;
 }
 
 void vdhs_layer_start(void) {
-    static int started;
-    if (started) return;
-    started = 1;
+    if (__atomic_exchange_n(&g_layer_started, 1, __ATOMIC_ACQ_REL)) return;
     g_t0 = now_ms();
     pthread_t t;
     pthread_attr_t a;

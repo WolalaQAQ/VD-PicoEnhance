@@ -419,6 +419,9 @@ typedef XrResult (*PFN_locate_space)(XrHandle, XrHandle, XrTime, XrSpaceLocation
 
 // Thresholds; overridable in <payload>/hand_gesture.txt as `key = value`
 // lines ('#' comments), read once per process (VD restart applies changes).
+#define PINCH_ON_CM_DEFAULT   0.4f
+#define PINCH_OFF_CM_DEFAULT  0.8f
+#define PINCH_FULL_CM_DEFAULT 3.0f
 static struct {
     float pinch_on_cm, pinch_off_cm, pinch_full_cm;
     float face_on_deg, face_off_deg;
@@ -437,9 +440,9 @@ static struct {
     float pt_bg_fix;           // 1 = re-resume a running background layer after another is paused
     float gaze_log;            // 1 = rate-limited EyeGazeSpace xrLocateSpace log
     float pt_split;            // 1 = one projected layer per hand geometry (PICO keeps one per layer)
-    // Eye gaze stabiliser (vdhs_layer.c gaze_filter): One-Euro on the
+    // Pointer-only stabiliser (vdhs_layer.c gaze_filter): One-Euro on the
     // head-relative gaze direction, hold on invalid samples, one-sample
-    // confirmation of jumps larger than gaze_jump_deg.
+    // confirmation of jumps larger than gaze_jump_deg. Streaming bypasses all.
     float gaze_filter, gaze_mincutoff, gaze_beta, gaze_hold_ms, gaze_jump_deg;
     // SteamVR trigger diagnosis: per-hand log period of VD's
     // trigger/grip curl formula (0 = off), and the frozen-joints gate
@@ -455,11 +458,12 @@ static struct {
     float pt_disc_r;           // sphere radius, meters (must not exceed VD's 0.1 window: excess draws black)
     float pt_max_age_ms;       // locate snapshot older than this is not drawn
     float pt_follow_settings;  // 1 = only in SteamVR with VD's "Passthrough hands" on (vdhs_hand_pt_gate)
-    float gaze_vd_fix;         // 1 = pre-compensate VD's PICO gaze composition (vdhs_layer.c gaze_vd_fix; A/B)
-} G = { 0.4f, 0.8f, 3.0f, 40.0f, 55.0f, 400.0f, 700.0f, 0.7f, 0.2f, 0.5f,
+    float gaze_vd_fix;         // 1 = pre-compensate verified VD pointer calls only (never GetEyeState/streaming)
+} G = { PINCH_ON_CM_DEFAULT, PINCH_OFF_CM_DEFAULT, PINCH_FULL_CM_DEFAULT,
+        40.0f, 55.0f, 400.0f, 700.0f, 0.7f, 0.2f, 0.5f,
         40.0f, 0.6f, 0.70f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 1.0f,
         1.0f, 1.0f, 0.5f, 150.0f, 25.0f, 250.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 8.0f, 0.11f, 300.0f, 1.0f, 0.0f };
+        0.0f, 0.0f, 1.0f, 8.0f, 0.11f, 300.0f, 1.0f, 1.0f };
 
 static void payload_path(const char* file, char* out, size_t cap) {
     out[0] = 0;
@@ -500,6 +504,17 @@ static void gesture_config_load(void) {
             for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++) if (!strcmp(k, keys[i].k)) *keys[i].v = v;
         }
         fclose(f);
+    }
+    // Keep hysteresis ordered and the strength denominator positive. Reject
+    // the whole group so partial overrides cannot leave inconsistent thresholds.
+    if (!isfinite(G.pinch_on_cm) || !isfinite(G.pinch_off_cm) || !isfinite(G.pinch_full_cm) ||
+        G.pinch_on_cm < 0 || G.pinch_on_cm >= G.pinch_off_cm ||
+        G.pinch_off_cm > G.pinch_full_cm) {
+        LOGE("aim: invalid pinch thresholds %g/%g/%gcm; using defaults for all three",
+             G.pinch_on_cm, G.pinch_off_cm, G.pinch_full_cm);
+        G.pinch_on_cm = PINCH_ON_CM_DEFAULT;
+        G.pinch_off_cm = PINCH_OFF_CM_DEFAULT;
+        G.pinch_full_cm = PINCH_FULL_CM_DEFAULT;
     }
     LOGI("aim: config %s pinch=%.1f/%.1f/%.1fcm face=%.0f/%.0fdeg menu=%.0f/%.0fms ext=%.2f curl=%.2f smooth=%.2f "
          "menu_face=%.0fdeg menu_pinch=%.1fcm menu_ext=%.2f shoulder=%.2f pitch=%.0fdeg aim_runtime=%.0f "
@@ -787,9 +802,14 @@ static void aim_update(uint32_t hand, XrHandle session, const XrHandJointsLocate
     // and pinch thresholds stay ours.
     uint64_t rt_status = aim->status;
     XrPosef rt_pose = aim->aimPose;
-    int rt_ok = G.aim_runtime > 0 && (rt_status & (AIM_COMPUTED | AIM_VALID)) &&
-                fabsf(rt_pose.orientation.x) + fabsf(rt_pose.orientation.y) + fabsf(rt_pose.orientation.z) +
-                fabsf(rt_pose.orientation.w) > 0.5f;
+    float rt_qnorm2 = rt_pose.orientation.x * rt_pose.orientation.x + rt_pose.orientation.y * rt_pose.orientation.y +
+                      rt_pose.orientation.z * rt_pose.orientation.z + rt_pose.orientation.w * rt_pose.orientation.w;
+    // COMPUTED alone does not make the runtime ray valid. OpenXR poses also
+    // require finite positions and unit quaternions (allow small roundoff).
+    int rt_ok = G.aim_runtime > 0 &&
+                (rt_status & (AIM_COMPUTED | AIM_VALID)) == (AIM_COMPUTED | AIM_VALID) &&
+                isfinite(rt_pose.position.x) && isfinite(rt_pose.position.y) && isfinite(rt_pose.position.z) &&
+                isfinite(rt_qnorm2) && fabsf(rt_qnorm2 - 1.0f) <= 0.01f;
     {
         static uint64_t last_rt[3] = { ~0ull, ~0ull, ~0ull };
         if ((rt_status & (AIM_COMPUTED | AIM_VALID)) != last_rt[hand]) {

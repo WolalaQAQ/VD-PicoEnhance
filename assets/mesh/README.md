@@ -1,8 +1,8 @@
 # Hand mesh blob (`hand_mesh_fb.bin`)
 
 `hand_mesh_fb.bin` is the hand mesh the compatibility layer serves for
-`XR_FB_hand_tracking_mesh`. Without it the layer simply does not advertise the
-mesh extension, so Virtual Desktop never asks for a hand model.
+`XR_FB_hand_tracking_mesh`. Without it the module does not enable Virtual
+Desktop's hand-mesh feature.
 
 ## What it is
 
@@ -46,17 +46,43 @@ directory:
 /data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin
 ```
 
-With rooted adb on the PC:
+The one-shot installer places this file automatically. For manual installation,
+launch Virtual Desktop once after installing the module, then close it. On the PC:
 
 ```sh
 adb push hand_mesh_fb.bin /data/local/tmp/
-adb shell su -c 'd=/data/data/VirtualDesktop.Android; mkdir -p $d/vdhs'
-adb shell su -c 'cp /data/local/tmp/hand_mesh_fb.bin /data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin'
-adb shell su -c 'd=/data/data/VirtualDesktop.Android; chown $(stat -c %u:%g $d) $d/vdhs/hand_mesh_fb.bin; chmod 0644 $d/vdhs/hand_mesh_fb.bin'
+adb shell
 ```
 
-Restart Virtual Desktop afterwards. If the file is absent, everything else
-still works; only the hand mesh is disabled.
+In the device shell, enter `su` to obtain root, then run:
+
+```sh
+set -e
+d=/data/data/VirtualDesktop.Android
+owner=$(stat -c %u:%g "$d")
+mkdir -p "$d/vdhs"
+chown "$owner" "$d/vdhs"
+chmod 0700 "$d/vdhs"
+cp /data/local/tmp/hand_mesh_fb.bin "$d/vdhs/hand_mesh_fb.bin"
+chown "$owner" "$d/vdhs/hand_mesh_fb.bin"
+chmod 0644 "$d/vdhs/hand_mesh_fb.bin"
+restorecon -RFD "$d/vdhs"
+exit
+exit
+```
+
+The directory must belong to the app so the injector can write its payload on
+the next launch. Restart Virtual Desktop afterwards. If the mesh file is absent,
+the module does not enable VD's hand-mesh feature.
+
+To generate a blob from your own headset's XRShell APK, install Python and numpy,
+then run on the PC:
+
+```sh
+python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
+```
+
+Install `out/hand_mesh_fb.bin` using the steps above.
 
 ## Disclaimer
 

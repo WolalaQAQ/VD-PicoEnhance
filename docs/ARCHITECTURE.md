@@ -50,7 +50,7 @@ track the installed build:
 | `xrCreateAction` / `xrGetActionStatePose` | Track `grip_pose`; report the controller pose inactive while PICO's active input is the hand. |
 | `xrGetSystemProperties` | Log the runtime's hand-tracking support flag. |
 | `xrEndFrame` / `xrPollEvent` | Layer-list / passthrough event handling and permission fixes. |
-| `xrCreateActionSpace` / `xrLocateSpace` | Eye-gaze space logging. |
+| `xrCreateActionSpace` / `xrLocateSpace` | Eye-gaze logging and pointer-only filtering / coordinate compensation. |
 | `xrReleaseSwapchainImage` (and friends, see `vdhs_pt.c`) | Hand-passthrough hole (below). |
 
 ### 2.1 Enabling the PICO hand-tracking extensions
@@ -92,10 +92,38 @@ extension is simply not advertised. See `tools/mesh/xrshell_mesh.py`.
 
 ## 3. Eye gaze
 
-The layer smooths the PICO gaze with a One-Euro filter plus a jump-confirmation
-step, and compensates the head pose that Virtual Desktop drops when it composes
-the PICO gaze. Pointer motion settings are configurable (see
-`config/hand_gesture.example.txt`).
+The layer's additional One-Euro smoothing, jump confirmation and invalid-sample
+hold (`gaze_filter`) apply only to the UI pointer. `gaze_vd_fix` pre-compensates
+the head pose that Virtual Desktop drops for that pointer. Both settings default
+to `1` in v1.0.4 and can be disabled independently in `hand_gesture.txt`
+(see `config/hand_gesture.example.txt`).
+
+VD uses the same OpenXR gaze-space lookup for its world-space pointer and its
+head-relative streaming data. Before processing a sample, the layer uses Mono's
+no-IL stack walker to identify the immediate managed consumer:
+
+- `Session.TryGetEyeGazePose` called by `OpenXRHMD.Update`: pointer processing.
+- `OpenXRHMD.GetEyeState`: pass through for foveated streaming / tracking forwarding.
+- Unknown callers or unavailable metadata: pass through.
+
+Streaming returns immediately after classification, retaining the original
+upstream pose and validity flags, with no extra filter, jump confirmation, sample
+hold or coordinate compensation. It also skips the pointer diagnostic's extra
+head/space queries, even with `gaze_log=1`. It continues through VD's native
+projection and sending logic. Thread ID and OpenXR space
+arguments are not used to guess intent: tracking forwarding can also call
+`GetEyeState` on the render thread. Filter history and gaze helper/log state are
+thread-local, so streaming queries cannot advance a pointer's filter history.
+One-time per-thread route logs report `filter_applied` and `vd_fix_applied`;
+streaming must report both as `0`. Per-sample pointer diagnostics observe the
+pose before coordinate compensation.
+
+v1.0.3 processed both consumers. With that release, disable both `gaze_vd_fix`
+and `gaze_filter` for unmodified streaming gaze. The routing fix in v1.0.4
+has passed one on-device observation on PICO 4 Pro / VD 1.34.22.0: with both
+settings enabled, logs showed pointer processing `1/1` and head-relative
+processing `0/0` on both the streaming and render threads. The user reported
+normal foveated-region following and menu-pointer behaviour.
 
 ## 4. Managed backends
 
@@ -125,6 +153,14 @@ assembly you already produced for your own device.
 The mod must never take down the host process. `VdHsMod.Loader.Start()` is fully
 guarded: every step degrades to a no-op on failure, and the native payload does
 its work on a detached thread rather than blocking VD's main thread.
+
+Native loader hooks become active together only after all required hooks are
+installed. A failed installation rolls back its hooks; callbacks remain
+pass-through until activation, including any hook that could not be removed.
+The optional swapchain hooks use the same all-or-nothing activation, so a
+partial installation cannot enable alpha-hole drawing or its layer flags.
+Once native-layer initialization starts, the managed payload and input probe
+leave runtime negotiation to VD-thread hooks, including after installation fails.
 
 ## 7. Scope and limitations
 

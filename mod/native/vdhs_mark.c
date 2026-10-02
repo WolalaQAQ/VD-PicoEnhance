@@ -182,10 +182,15 @@ void vdhs_runtime_reset(void) { g_gipa = 0; }
 // this only tries once and never spawns a thread.
 // Returns 0 when marked, -1 when the runtime is not up yet, <0 on error.
 extern int vdhs_layer_active(void) __attribute__((weak));   // Zygisk route only
+extern int vdhs_layer_started(void) __attribute__((weak));
 int vdhs_mark_loaded(void) {
-    // With the layer's hooks in place the mark is done on VD's thread; a second
-    // negotiate from the managed payload thread is exactly that risk.
-    if (vdhs_layer_active && vdhs_layer_active()) { LOGI("mark_loaded: skipped (compat layer active)"); return 0; }
+    // Once the layer owns marking, never retry negotiate from the managed
+    // payload thread, including while hooks are installing or after failure.
+    if (vdhs_layer_started && vdhs_layer_started()) {
+        int active = vdhs_layer_active && vdhs_layer_active();
+        LOGI("mark_loaded: skipped (compat layer owns marking, active=%d)", active);
+        return active ? 0 : -1;
+    }
     return mark_now();
 }
 
@@ -193,8 +198,14 @@ int vdhs_mark_loaded(void) {
 // Returns the value, or a negative code when unavailable.
 int vdhs_active_input(uint64_t instance) {
     if (!instance) return -10;
-    int rc = ensure_runtime();
-    if (rc != 0) return rc;
+    if (vdhs_layer_started && vdhs_layer_started()) {
+        // InstanceProbe also runs on a managed background thread. A failed or
+        // late hook install must not negotiate through this diagnostic path.
+        if (!vdhs_layer_active || !vdhs_layer_active() || !g_gipa) return -1;
+    } else {
+        int rc = ensure_runtime();
+        if (rc != 0) return rc;
+    }
     typedef XrResult (*PFN_xrGetActiveInputDeviceTypePico)(XrInstance, uint32_t*);
     PFN_xrGetActiveInputDeviceTypePico fn = 0;
     XrResult r = g_gipa(instance, "xrGetActiveInputDeviceTypePico", (PFN_xrVoidFunction*)&fn);

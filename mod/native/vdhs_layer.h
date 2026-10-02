@@ -4,6 +4,7 @@
 // vdhs_layer.c
 void vdhs_layer_start(void);   // spawn the hook installer (idempotent)
 int  vdhs_layer_active(void);  // 1 once all loader hooks are installed
+int  vdhs_layer_started(void); // layer owns runtime marking, even if hooks fail
 int  vdhs_layer_marked(void);  // 1 once xrMarkApiClass succeeded from a hook
 
 // vdhs_hand.c
@@ -28,7 +29,7 @@ typedef struct { float x, y, z, radius; uint64_t flags; } vdhs_pt_joint;
 int vdhs_pt_hand_snapshot(int hand, vdhs_pt_joint* out, int max);
 
 // vdhs_pt.c
-int  vdhs_pt_install(uintptr_t loader_base);        // hook the 4 swapchain loader exports
+int  vdhs_pt_install(uintptr_t loader_base);        // install the 5 swapchain hooks as a group
 void vdhs_pt_on_end_frame(const void* frame_end_info); // record VR views, OR layer flags
 uint64_t vdhs_pt_current_space(void);   // space of VD's last projection layer (= Session.CurrentSpace), 0 if none
 

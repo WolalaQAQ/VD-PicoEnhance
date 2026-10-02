@@ -11,6 +11,14 @@ VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时向 Virtual Desktop 
 
 > 实验性，需要 root，且与 Virtual Desktop 版本相关。模块会 hook 一个闭源商业应用，Virtual Desktop 更新后可能失效。安装前请阅读[使用条件](#使用条件)、[已知问题](#已知问题)与[免责声明](#免责声明)。这是独立的社区项目，与 Virtual Desktop、PICO 官方无关。
 
+## v1.0.4 更新
+
+- **修复注视点串流的坐标偏移和额外延迟**：眼动平滑与头部姿态补偿现在只用于界面指针，串流和追踪转发保留原始眼动数据。指针头部补偿默认开启（`gaze_vd_fix=1`）。
+- **修复启动和安装问题**：修正扩展列表越界、首次安装目录权限、Hook 部分安装失败及旧载荷残留；安装步骤失败时会停止并报错。
+- **修复手部射线与捏合配置**：runtime 射线无效时使用合成射线，并校验捏合阈值，避免无效配置影响手势。
+
+修复构建已在 PICO 4 Pro / VD 1.34.22.0 上完成一轮实机观察，手／手柄切换、捏合与射线恢复、双手透视、眼动及重新启动均正常，当时头部补偿已开启。升级需安装完整模块并重启头显；已有配置中显式设置的 `gaze_vd_fix=0` 会继续生效，改为 `1` 或删除该行即可启用。详细记录见[更新日志](CHANGELOG_zh.md)。
+
 ## 功能
 
 | 功能 | 做法 | 开关（`hand_gesture.txt`） |
@@ -22,7 +30,7 @@ VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时向 Virtual Desktop 
 | 手部透视（Virtual Desktop 内） | 每只手一个独立的 projected 层；未绘制时恢复背景透视 | `pt_split`、`pt_bg_fix` |
 | 手部透视（SteamVR） | 在 Virtual Desktop 串流画面的 swapchain 上原地改 alpha，只在手的位置开孔；不拷贝、不加层 | `pt_hole`、`pt_follow_settings` |
 | 冻结门控 | runtime 关节数据长时间不更新时，把这只手报告为不活跃，缓解手势"亮一下就消失" | `hj_freeze_ms` |
-| Eye gaze | One-Euro 平滑与跳变确认，并补偿 Virtual Desktop 在 PICO 上漏乘的头部姿态 | `gaze_filter`、`gaze_vd_fix` |
+| Eye gaze | 仅对界面指针做 One-Euro 平滑、跳变确认和头部姿态补偿；串流眼动透传，两项增强默认开启 | `gaze_filter`、`gaze_vd_fix` |
 
 SteamVR 里开孔的条件与 Virtual Desktop 自身的 `PassthroughPortals` 逻辑一致：串流源为 VR、`VRPassthroughHands` 打开、当前输入是手等。不在 SteamVR 时，模块不改动任何层。
 
@@ -86,17 +94,19 @@ powershell -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
 ### 手动安装
 
 1. 在 Magisk 里选择 **模块 → 从本地安装**，选择 `vdhs_zygisk.zip`，然后重启头显。
-2. 重启后模块即启用完整兼容层，启动 Virtual Desktop 就能用上手追、透视和眼动修正。
+2. 启动一次 Virtual Desktop，再按下文[手部网格](#手部网格)说明放入 `hand_mesh_fb.bin` 并重启应用。一键安装已包含网格安装。
 
 `payload/mode.txt` 默认为 `2`，即完整兼容层。需要做“只注入、不加载托管层”的对照测试时，把 `/data/adb/modules/vdhs_zygisk/payload/mode.txt` 改成 `1`，重启 Virtual Desktop 生效。
 
-之后只更新载荷时不必重启整机：把 `libvdhs.so` 推到 `/data/adb/modules/vdhs_zygisk/payload/`，重启 Virtual Desktop 即可。
+之后只更新载荷时不必重启整机：把 `libvdhs.so` 推到 `/data/adb/modules/vdhs_zygisk/payload/`，重启 Virtual Desktop 即可。v1.0.4 同时更新了注入器，升级到此版本需安装完整 ZIP 并重启头显。
 
 > PICO 处于手势模式时会阻止 Virtual Desktop 冷启动。先拿起手柄，等 `getprop sys.pxr.trackingservice.gesturemode` 变成 `0`，再启动 Virtual Desktop。
 
 ## 配置
 
 把 [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) 复制到设备上的 `/data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt`，按需修改。每个键都是可选的，缺省时沿用内置默认值；该文件里列出了全部键名与当前建议值。
+
+SteamVR 手部透视需设置 `pt_hole=1`，并打开 VD 的“VR 手部透视”。v1.0.4 的界面眼动平滑和头部补偿默认开启；旧配置中的显式设置优先于默认值。保存配置后重启 VD 生效。
 
 ### 手部网格
 
@@ -106,15 +116,30 @@ powershell -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
 /data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin
 ```
 
-没有这个文件时，该扩展不可用，其他功能不受影响。这个目录在模块运行过一次后已经存在。
+没有这个文件时，模块不向 VD 启用手部网格功能。这个目录在模块运行过一次后已经存在。
 
-**使用 Release 附带的 blob（推荐）**。在 PC 上通过有 root 的 adb：
+**使用 Release 附带的 blob（推荐）**。一键安装脚本会自动放置网格。手动安装时，在 PC 上执行：
 
 ```sh
 adb push hand_mesh_fb.bin /data/local/tmp/
-adb shell su -c 'd=/data/data/VirtualDesktop.Android; mkdir -p $d/vdhs'
-adb shell su -c 'cp /data/local/tmp/hand_mesh_fb.bin /data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin'
-adb shell su -c 'd=/data/data/VirtualDesktop.Android; chown $(stat -c %u:%g $d) $d/vdhs/hand_mesh_fb.bin; chmod 0644 $d/vdhs/hand_mesh_fb.bin'
+adb shell
+```
+
+在设备 shell 中输入 `su` 获取 root，然后执行：
+
+```sh
+set -e
+d=/data/data/VirtualDesktop.Android
+owner=$(stat -c %u:%g "$d")
+mkdir -p "$d/vdhs"
+chown "$owner" "$d/vdhs"
+chmod 0700 "$d/vdhs"
+cp /data/local/tmp/hand_mesh_fb.bin "$d/vdhs/hand_mesh_fb.bin"
+chown "$owner" "$d/vdhs/hand_mesh_fb.bin"
+chmod 0644 "$d/vdhs/hand_mesh_fb.bin"
+restorecon -RFD "$d/vdhs"
+exit
+exit
 ```
 
 改完重启 Virtual Desktop。也可以直接在头显上用带 root 的文件管理器复制到上面的路径。
@@ -135,6 +160,11 @@ python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
 - runtime（或 SteamVR）偶尔会让手部关节长时间冻结，手势"亮一下就消失"，重启 SteamVR 可以恢复。
 - 头显内会显示 PICO 的"不支持手势"提示框，暂不处理。
 - Virtual Desktop 更新可能改动内部命名，导致兼容层失效，需要等适配。
+
+## 待做
+
+- [ ] **USB 有线串流**：Virtual Desktop 1.34.22 支持通过 USB NCM 有线串流，但 PICO 侧目前没有把这条链路开放给应用，所以应用里的 USB 模式默认不可用。计划是先让头显起来一个 USB 网络接口、再让兼容层用上它，在真机上验证链路和发现之后再决定是否做成正式功能。
+- [ ] **控制器电量**：把 PICO 手柄的电量传到 SteamVR，这样在 SteamVR 和游戏里也能看到手柄还剩多少电。
 
 ## 卸载与回滚
 

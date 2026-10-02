@@ -119,8 +119,10 @@ uint64_t vdhs_pt_current_space(void) { return g_current_space; }
 static const char kLoaderNeedle[] = "/lib/arm64/libopenxr_loader.so";
 
 // ---------------------------------------------------------------- config gate
+static int g_pt_hooks_ok;
 static int pt_cfg_state;   // 0 untried, 1 = on, -1 = off
 static int pt_enabled(void) {
+    if (!__atomic_load_n(&g_pt_hooks_ok, __ATOMIC_ACQUIRE) || !vdhs_layer_active()) return 0;
     if (!pt_cfg_state) {
         int on = vdhs_hand_cfg("pt_hole") > 0 || vdhs_hand_cfg("pt_alpha_only") > 0;
         pt_cfg_state = on ? 1 : -1;
@@ -852,16 +854,22 @@ int vdhs_pt_install(uintptr_t base) {
         if (!addr[i]) { LOGE("pt: install %s not in .dynsym", specs[i].name); return -1; }
         LOGI("pt: install %s @ +0x%lx", specs[i].name, (unsigned long)((uintptr_t)addr[i] - base));
     }
-    int ok = 0;
+    void* stubs[N] = { 0 };
     for (int i = 0; i < N; i++) {
-        void* stub = shadowhook_hook_func_addr(addr[i], specs[i].hook, specs[i].orig);
-        if (!stub) {
+        stubs[i] = shadowhook_hook_func_addr(addr[i], specs[i].hook, specs[i].orig);
+        if (!stubs[i]) {
             int e = shadowhook_get_errno();
             LOGE("pt: hook %s failed: %d %s", specs[i].name, e, shadowhook_to_errmsg(e));
-            continue;
+            for (int j = i - 1; j >= 0; j--) {
+                int urc = shadowhook_unhook(stubs[j]);
+                if (urc != 0) LOGE("pt: rollback %s failed: %d", specs[j].name, urc);
+            }
+            // Any callback left in flight stays transparent via pt_enabled().
+            // Do not clear its original trampoline slot.
+            return -1;
         }
-        ok++;
     }
-    LOGI("pt: swapchain hooks %d/%d", ok, N);
-    return ok == N ? 0 : -1;
+    __atomic_store_n(&g_pt_hooks_ok, 1, __ATOMIC_RELEASE);
+    LOGI("pt: swapchain hooks %d/%d", N, N);
+    return 0;
 }

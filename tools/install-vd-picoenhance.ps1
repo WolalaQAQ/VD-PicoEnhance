@@ -60,6 +60,16 @@ $AppDir = "/data/data/$AppId"
 function Write-Step { param([string]$Message) Write-Host "==> $Message" -ForegroundColor Cyan }
 function Write-Ok { param([string]$Message) Write-Host "    $Message" -ForegroundColor Green }
 
+function Invoke-Adb {
+    param([string[]]$Arguments)
+    # Windows PowerShell 5.1 does not turn native exit codes into exceptions.
+    $output = & $Adb @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "adb failed (exit code $LASTEXITCODE): $($Arguments -join ' ')`n$($output -join [Environment]::NewLine)"
+    }
+    $output
+}
+
 # --- locate the local module and mesh ---------------------------------------
 Write-Step 'Looking for the local module and hand mesh'
 if (-not $ZipPath) { $ZipPath = Join-Path $PSScriptRoot 'vdhs_zygisk.zip' }
@@ -95,7 +105,8 @@ Write-Ok "adb: $Adb"
 
 # --- find the headset -------------------------------------------------------
 Write-Step 'Looking for a headset'
-$devices = @((& $Adb devices) | Select-Object -Skip 1 |
+$deviceList = Invoke-Adb -Arguments @('devices')
+$devices = @($deviceList | Select-Object -Skip 1 |
     Where-Object { ($_ -split '\s+')[1] -eq 'device' } |
     ForEach-Object { ($_ -split '\s+')[0] })
 if ($Serial) {
@@ -109,7 +120,7 @@ Write-Ok "device: $Serial"
 
 # --- root -------------------------------------------------------------------
 Write-Step 'Checking root'
-$id = ((& $Adb -s $Serial shell 'su -c id') 2>&1 | Out-String)
+$id = Invoke-Adb -Arguments @('-s', $Serial, 'shell', 'su -c id') | Out-String
 if ($id -notmatch 'uid=0') {
     throw "Root is required and 'su' did not return uid=0. Enable Magisk and grant shell root."
 }
@@ -117,32 +128,39 @@ Write-Ok 'root ok'
 
 # --- push -------------------------------------------------------------------
 Write-Step 'Pushing files to the headset'
-& $Adb -s $Serial push $ZipPath /data/local/tmp/vdhs_zygisk.zip | Out-Null
-& $Adb -s $Serial push $MeshPath /data/local/tmp/hand_mesh_fb.bin | Out-Null
+Invoke-Adb -Arguments @('-s', $Serial, 'push', $ZipPath, '/data/local/tmp/vdhs_zygisk.zip') | Out-Null
+Invoke-Adb -Arguments @('-s', $Serial, 'push', $MeshPath, '/data/local/tmp/hand_mesh_fb.bin') | Out-Null
 Write-Ok 'pushed to /data/local/tmp'
 
 # --- install the Magisk module ---------------------------------------------
 Write-Step 'Installing the Magisk module'
-$install = ((& $Adb -s $Serial shell "su -c 'magisk --install-module /data/local/tmp/vdhs_zygisk.zip'") 2>&1 | Out-String)
+$install = Invoke-Adb -Arguments @('-s', $Serial, 'shell', "su -c 'magisk --install-module /data/local/tmp/vdhs_zygisk.zip'") | Out-String
 Write-Host ($install.Trim())
 if ($install -notmatch 'Done') { throw 'Module installation did not report success.' }
 
 Write-Step "Setting payload mode to $Mode"
-& $Adb -s $Serial shell "su -c 'echo $Mode > /data/adb/modules_update/$ModuleId/payload/mode.txt 2>/dev/null; echo $Mode > /data/adb/modules/$ModuleId/payload/mode.txt 2>/dev/null; true'" | Out-Null
+$remote = 'set -e; found=0; for d in /data/adb/modules_update/' + $ModuleId + ' /data/adb/modules/' + $ModuleId + '; do ' +
+          'if [ -d $d ]; then echo ' + $Mode + ' > $d/payload/mode.txt; found=1; fi; done; ' +
+          'if [ $found -ne 1 ]; then echo Module-directory-not-found >&2; exit 1; fi'
+Invoke-Adb -Arguments @('-s', $Serial, 'shell', "su -c '$remote'") | Out-Null
 Write-Ok "mode = $Mode"
 
 # --- place the hand mesh ----------------------------------------------------
 Write-Step 'Placing the hand mesh'
-$remote = 'd=' + $AppDir + '; mkdir -p $d/vdhs; cp /data/local/tmp/hand_mesh_fb.bin $d/vdhs/hand_mesh_fb.bin; ' +
-          'chown $(stat -c %u:%g $d) $d/vdhs/hand_mesh_fb.bin; chmod 0644 $d/vdhs/hand_mesh_fb.bin; ls -l $d/vdhs/hand_mesh_fb.bin'
-& $Adb -s $Serial shell "su -c '$remote'"
+# -D includes app data when restoring Android's SELinux labels.
+$remote = 'set -e; d=' + $AppDir + '; owner=$(stat -c %u:%g $d); mkdir -p $d/vdhs; ' +
+          'chown $owner $d/vdhs; chmod 0700 $d/vdhs; ' +
+          'cp /data/local/tmp/hand_mesh_fb.bin $d/vdhs/hand_mesh_fb.bin; ' +
+          'chown $owner $d/vdhs/hand_mesh_fb.bin; chmod 0644 $d/vdhs/hand_mesh_fb.bin; ' +
+          'restorecon -RFD $d/vdhs; ls -l $d/vdhs/hand_mesh_fb.bin'
+Invoke-Adb -Arguments @('-s', $Serial, 'shell', "su -c '$remote'")
 
 # --- reboot -----------------------------------------------------------------
 if ($NoReboot) {
     Write-Step 'Skipping the reboot (-NoReboot). The module applies on the next boot.'
 } else {
     Write-Step 'Rebooting the headset'
-    & $Adb -s $Serial reboot | Out-Null
+    Invoke-Adb -Arguments @('-s', $Serial, 'reboot') | Out-Null
     Write-Ok 'reboot sent; the module applies during boot'
 }
 

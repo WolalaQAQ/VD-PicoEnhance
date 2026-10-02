@@ -100,6 +100,9 @@ if ($RedirectArtifact) {
     if (-not (Test-Path $RedirectArtifact)) { throw "redirect artifact not found: $RedirectArtifact" }
     Copy-Item $RedirectArtifact (Join-Path $OutPayload 'Xenko.OpenXR.patched.dll') -Force
     Write-Host "  staged Xenko.OpenXR.patched.dll"
+} else {
+    $redirect = Join-Path $OutPayload 'Xenko.OpenXR.patched.dll'
+    if (Test-Path -LiteralPath $redirect) { Remove-Item -LiteralPath $redirect -Force }
 }
 
 Write-Host 'staged:'

@@ -45,29 +45,37 @@ pt_bg_fix = 1
 hj_freeze_ms = 300
 
 # --- Eye gaze ---------------------------------------------------------------
-# One-Euro smoothing + jump confirmation, and the VD-on-PICO head-pose fix.
-# 1 = pre-compensate the head pose VD drops when composing the PICO gaze
-#     (recommended on PICO).
+# Pointer-only One-Euro smoothing, jump confirmation and head-pose compensation.
+# Only verified UI-pointer calls are processed. Streaming / tracking forwarding
+# bypass ALL of these steps, preserving the upstream pose and validity flags.
+# Unrecognised call chains also pass through unchanged.
+# Compensation defaults to 1 in v1.0.4; set 0 to disable it for the pointer.
+# On v1.0.3, use BOTH gaze_vd_fix=0 and gaze_filter=0 for raw streaming gaze.
 gaze_vd_fix = 1
 # gaze_filter   = 1
 # gaze_beta     = 0.01    # One-Euro beta
 # gaze_mincutoff = 1.0    # One-Euro minimum cutoff (Hz)
 # gaze_jump_deg = 8       # treat a jump larger than this as a new fixation
-# gaze_hold_ms  = 120     # hold time before accepting a jump
-# gaze_log      = 0       # verbose gaze logging (debug)
+# gaze_hold_ms  = 120     # max hold of last valid direction on invalid samples
+# gaze_log      = 0       # verbose pointer-gaze logging (debug)
 
 # --- Synthesised aim / pinch / menu (XR_FB_hand_tracking_aim) ---------------
-# When the PICO runtime does not supply an aim state, the layer synthesises
-# pinch, a shoulder->index-proximal pointing ray, and a palm-toward-headset
-# menu gesture.
+# The layer synthesises pinch and a palm-toward-headset menu gesture.
+# A valid runtime aim pose is preferred; otherwise a shoulder->index-proximal
+# pointing ray is synthesised.
 # aim_runtime  = 1        # prefer the runtime's own aim when it is valid
 # aim_shoulder = 1        # shoulder->proximal ray (vs index direction)
 # aim_smooth   = 0.2      # ray smoothing
-# aim_update   = 1        # update the aim each frame
 # aim_pitch_deg = 0       # pitch offset
-# pinch_on_cm   = 2.0     # pinch begins below this tip distance (metres*100)
-# pinch_off_cm  = 3.0     # pinch releases above this
-# pinch_full_cm = 0.5     # fully-pressed distance
-# menu_pinch    = 1       # palm-toward-headset = menu
+# Pinch distance is the fingertip gap in cm, after subtracting both joint radii.
+# Strength = clamp((full - distance) / (full - on), 0, 1)^2:
+# 1 at/below on, 0 at/above full (despite the historical "full" key name).
+# Values must be finite, with 0 <= on < off <= full.
+# Invalid groups (including partial overrides) log an error and reset all three
+# thresholds to the built-in defaults shown below.
+# pinch_on_cm   = 0.4     # pinch begins below this; strength reaches 1 here
+# pinch_off_cm  = 0.8     # pinch releases above this (hysteresis)
+# pinch_full_cm = 3.0     # strength reaches 0 at this separation
+# menu_pinch_cm = 0.6     # index-thumb gap to begin the palm-facing menu pinch
 # menu_hold_ms  = 500     # hold time for the menu gesture
 # menu_cooldown_ms = 300  # cooldown between menu presses
