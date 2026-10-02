@@ -17,8 +17,7 @@
 //
 // Vendored verbatim from:
 //   https://github.com/topjohnwu/zygisk-module-sample/blob/master/module/jni/zygisk.hpp
-// API v5, minimal Magisk 27000. See docs/HAND-VD-ZYGISK-2026-09-28.md for the
-// downgrade procedure if the device Magisk is older than 27000.
+// API v5, minimal Magisk 27000.
 
 #pragma once
 

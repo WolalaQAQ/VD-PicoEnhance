@@ -12,7 +12,7 @@
 //   - xrCreateHandTrackerEXT / xrDestroyHandTrackerEXT wrappers: handle -> hand.
 //   - xrLocateHandJointsEXT wrapper: FB structs are unlinked from the next chain
 //     for the runtime call, then XrHandTrackingScaleFB is filled (1.0) and
-//     XrHandTrackingAimStateFB is synthesised from the joints (§2.2: pinch,
+//     XrHandTrackingAimStateFB is synthesised from the joints (pinch,
 //     shoulder->index-proximal ray, palm-toward-headset menu gesture).
 #define _GNU_SOURCE
 #include <dlfcn.h>
@@ -395,7 +395,7 @@ static void mesh_selftest(XrHandle tracker, uint32_t hand) {
          ok && r2 == 0);
 }
 
-// ---------------------------------------------------------------- §2.2 aim synthesis + menu gesture
+// ---------------------------------------------------------------- aim synthesis + menu gesture
 // Pinch metric / aim ray follow the approach in StereoKit input_hand.cpp and
 // hand_oxr_articulated.cpp (MIT) and Monado ht_ctrl_emu.cpp (BSL-1.0); code is
 // written from scratch, only thresholds/geometry are taken from there.
@@ -441,11 +441,11 @@ static struct {
     // head-relative gaze direction, hold on invalid samples, one-sample
     // confirmation of jumps larger than gaze_jump_deg.
     float gaze_filter, gaze_mincutoff, gaze_beta, gaze_hold_ms, gaze_jump_deg;
-    // SteamVR trigger diagnosis (§4.3e): per-hand log period of VD's
+    // SteamVR trigger diagnosis: per-hand log period of VD's
     // trigger/grip curl formula (0 = off), and the frozen-joints gate
     // (report isActive=0 once the runtime repeats identical joints this long; 0 = off).
     float hj_diag_ms, hj_freeze_ms;
-    // Zero-copy alpha hole in the VR projection swapchain (§4.3e). pt_hole
+    // Zero-copy alpha hole in the VR projection swapchain. pt_hole
     // draws the joint balls (scissor-limited, alpha only); pt_alpha_only only
     // ORs 0x6 into the projection layer flags to probe whether VD's alpha is 1
     // outside the hands. Both default off.
@@ -681,7 +681,7 @@ static float finger_dot(const XrHandJointLocationEXT* j, int prox, int tip) {
     return vdot(vnorm(vsub(jp(j, prox), jp(j, J_WRIST))), vnorm(vsub(jp(j, tip), jp(j, prox))));
 }
 
-// ---------------------------------------------------------------- SteamVR trigger diagnosis (§4.3e)
+// ---------------------------------------------------------------- SteamVR trigger diagnosis
 // Frozen-joints detector. The runtime keeps isActive=1 with bit-identical
 // joints after the headset is taken off (s7-hmd3). Returns how long (ms) the
 // joints have been unchanged; negative when hj_freeze_ms gated the sample

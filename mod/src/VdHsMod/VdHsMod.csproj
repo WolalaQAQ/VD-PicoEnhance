@@ -3,7 +3,7 @@
   <!--
     VdHsMod - VD hand/controller hot-switch mod, loader-agnostic.
 
-    Hard rule (design §3.1): ZERO compile-time reference to any VD / Xenko /
+    Hard rule: ZERO compile-time reference to any VD / Xenko /
     Mono.Android assembly. Everything the mod touches is reached by name
     through reflection. The only optional dependency is HarmonyLib, and it is
     opt-in (see VdHsHarmony below) so the default build restores from nothing

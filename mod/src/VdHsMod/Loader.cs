@@ -11,7 +11,7 @@ namespace VdHsMod
     ///          embedding API and invokes <c>Loader.Start()</c> with no
     ///          arguments and no return value.
     ///
-    /// Contract (design §3.3): Start() must never throw. Every step is wrapped;
+    /// Contract: Start() must never throw. Every step is wrapped;
     /// a failure degrades to a no-op so the host process (VD) survives.
     /// </summary>
     public static class Loader

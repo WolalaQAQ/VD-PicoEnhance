@@ -113,7 +113,7 @@ static int64_t now_ms(void) {
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-// Extensions the layer serves itself (§2.2/§2.3): advertised in enumerate,
+// Extensions the layer serves itself: advertised in enumerate,
 // stripped before the runtime's xrCreateInstance. Off until step 3/4 lands so
 // VD does not enable features the layer cannot serve yet.
 static const char* const kLayerExts[] = { "XR_FB_hand_tracking_mesh", "XR_FB_hand_tracking_aim" };
@@ -123,7 +123,7 @@ static const char kHandExt[] = "XR_EXT_hand_tracking";
 // Xenko.OpenXR.Extension values (extracted/decompiled/.../Extension.cs).
 enum { kExtEnumHandTracking = 27, kExtEnumFbAim = 50, kExtEnumFbMesh = 52 };
 
-// ---------------------------------------------------------------- §2.4 passthrough diagnostics
+// ---------------------------------------------------------------- passthrough diagnostics
 // Log-only wrappers around VD's Hands passthrough path (PassthroughPortals.cs):
 // return codes plus the geometry-instance pose/scale. Behaviour is unchanged.
 typedef struct { float x, y, z, w; } XrQuaternionf;
@@ -623,7 +623,7 @@ static XrResult hk_create_instance(const XrInstanceCreateInfo* ci, XrInstance* o
          (unsigned long long)(r == 0 && out ? *out : 0), has_hand || hand_added);
     free(names);
 
-    // Plan A (§4.3a): VD has already stored the whitelist-filtered set in
+    // Plan A: VD has already stored the whitelist-filtered set in
     // XR._supportedExtensions (XR.cs:1159); add hand tracking to it so
     // Session.InitializeHandTracking runs. 52 (mesh) only when the layer can
     // serve xrGetHandMeshFB, otherwise VD's CheckError would throw.
@@ -754,7 +754,7 @@ static XrResult hk_poll_event(XrInstance inst, XrBaseOutStructure* ev) {
     return r;
 }
 
-// Log-only (§4.3c item 2): EyeGazeSpace = action space of VD's "eye_gaze_pose"
+// Log-only: EyeGazeSpace = action space of VD's "eye_gaze_pose"
 // action (XR.cs:748, Session.cs:968). xrLocateSpace results for it are logged
 // ~2 Hz with the angle change since the previous logged sample.
 static volatile XrAction g_gaze_action;
@@ -776,7 +776,7 @@ static XrResult hk_create_action_space(XrSession s, const XrActionSpaceCreateInf
     return r;
 }
 
-// Eye gaze stabiliser (§4.3d, hand_gesture.txt gaze_filter, default 1).
+// Eye gaze stabiliser (hand_gesture.txt gaze_filter, default 1).
 // PICO's gaze_ext pose is the raw combined gaze (no smoothing in runtime or
 // client) as head pose ∘ gaze. The gaze direction is taken relative to the head
 // (VIEW space at the same time and base), One-Euro filtered there, and
@@ -990,7 +990,7 @@ static void gaze_log_sample(XrHandle base, int64_t time, const XrSpaceLocation* 
     float d1 = fabsf(raw_q.x * last_raw.x + raw_q.y * last_raw.y + raw_q.z * last_raw.z + raw_q.w * last_raw.w);
     float d2 = fabsf(q.x * last_out.x + q.y * last_out.y + q.z * last_out.z + q.w * last_out.w);
     XrVector3f f = gq_fwd(q);
-    // Upward-offset diagnosis (§4.3g): on PICO VD composes
+    // Upward-offset diagnosis: on PICO VD composes
     // locate(Gaze,Stage) with locate(Stage,Head) (Session.cs:1446-1452) and
     // casts the result as a world ray (TouchInjector.cs:288-290). Log the head
     // forward and the forward VD ends up with, so the offset can be compared

@@ -6,7 +6,7 @@ namespace VdHsMod
     /// <summary>
     /// Every handle into VD is resolved here, by name. Nothing in this assembly
     /// holds a compile-time reference to Xenko.*, VirtualDesktop.* or
-    /// Mono.Android.* (design §3.1).
+    /// Mono.Android.* through reflection only.
     ///
     /// All type/field/method names below are <c>observed</c> in
     /// VD 1.34.22.0 (E-023 / decompiled Xenko.OpenXR).

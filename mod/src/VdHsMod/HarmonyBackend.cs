@@ -8,7 +8,7 @@ using HarmonyLib;
 namespace VdHsMod
 {
     /// <summary>
-    /// Runtime IL patching (design §2 Track Z primary idea).
+    /// Runtime IL patching through the Harmony backend.
     ///
     ///   * <c>XR.IsControllerActive</c> prefix: return false while PICO reports
     ///     the active input device is the hand (2).

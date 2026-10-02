@@ -4,7 +4,7 @@
 // VdHsMod.dll into the target app's data dir, dlopens it, and calls
 // vdhs_payload_main(javaVm, mode).
 //
-// Responsibilities (design §2 Track Z):
+// Responsibilities:
 //   1. wait until the app's Mono runtime is up (libmonosgen-2.0.so mapped and
 //      a root domain exists);
 //   2. attach this thread;

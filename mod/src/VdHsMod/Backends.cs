@@ -33,7 +33,7 @@ namespace VdHsMod
             ExtensionEnabler.Install();
             // No Harmony hook, so mark has to happen before VD initialises the
             // runtime. Whether the runtime keeps the mark across VD's own
-            // xrInitializeLoaderKHR is unverified (design §5.2).
+            // xrInitializeLoaderKHR is unverified.
             NativeBridge.MarkLoaded();
             ModLog.Warn("dataonly: extension list patched; IsControllerActive NOT changed (needs harmony/redirect)");
             return true;
@@ -52,7 +52,7 @@ namespace VdHsMod
                 case "redirect": return new RedirectBackend();
                 case "harmony":
                     // Load 0Harmony from the payload before HarmonyBackend.Install
-                    // is JIT-compiled; there is no AssemblyResolve fallback (§3 #6).
+                    // is JIT-compiled; there is no AssemblyResolve fallback.
                     if (!HarmonyBackend.HarmonyAvailable())
                     {
                         ModLog.Warn("harmony requested but 0Harmony not loadable -> dataonly");

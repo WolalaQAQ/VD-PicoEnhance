@@ -1,6 +1,6 @@
 // VD-PicoEnhance - Zygisk loader.
 //
-// Thin by design (design §3.2): match the target process, stage the payload
+// Thin by design: match the target process, stage the payload
 // files out of the module dir into the app's private data dir, dlopen
 // libvdhs.so and hand control to vdhs_payload_main(). All managed-mod logic
 // lives in VdHsMod.dll; the payload only bridges into Mono.

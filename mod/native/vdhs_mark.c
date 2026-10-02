@@ -6,7 +6,7 @@
 // extensions out of its advertised list. We reach the runtime through the same system
 // forward loader named in /vendor/etc/openxr/1/active_runtime.json.
 //
-// This file is the SINGLE SOURCE shared by both tracks (design §4/§6):
+// This file is the SINGLE SOURCE shared by both routes:
 //   Track R: patch/native/vdhs_mark.c #includes this file, the patched
 //            Xenko.OpenXR.dll P/Invokes vdhs_mark().
 //   Track Z: the Zygisk payload is this same libvdhs.so; VdHsMod uses
