@@ -21,6 +21,7 @@
 
 .PARAMETER MeshPath
     Local hand mesh blob. Defaults to hand_mesh_fb.bin beside this script.
+    An existing mesh is preserved unless this parameter is explicitly supplied.
 
 .PARAMETER Adb
     Path to adb.exe. Defaults to adb on PATH, then the SDK platform-tools.
@@ -56,6 +57,7 @@ $ErrorActionPreference = 'Stop'
 $AppId = 'VirtualDesktop.Android'
 $ModuleId = 'vdhs_zygisk'
 $AppDir = "/data/data/$AppId"
+$ReplaceMesh = if ($PSBoundParameters.ContainsKey('MeshPath')) { 1 } else { 0 }
 
 function Write-Step { param([string]$Message) Write-Host "==> $Message" -ForegroundColor Cyan }
 function Write-Ok { param([string]$Message) Write-Host "    $Message" -ForegroundColor Green }
@@ -150,7 +152,8 @@ Write-Step 'Placing the hand mesh'
 # -D includes app data when restoring Android's SELinux labels.
 $remote = 'set -e; d=' + $AppDir + '; owner=$(stat -c %u:%g $d); mkdir -p $d/vdhs; ' +
           'chown $owner $d/vdhs; chmod 0700 $d/vdhs; ' +
-          'cp /data/local/tmp/hand_mesh_fb.bin $d/vdhs/hand_mesh_fb.bin; ' +
+          'if [ ! -e $d/vdhs/hand_mesh_fb.bin ] || [ ' + $ReplaceMesh + ' -eq 1 ]; then ' +
+          'cp /data/local/tmp/hand_mesh_fb.bin $d/vdhs/hand_mesh_fb.bin; fi; ' +
           'chown $owner $d/vdhs/hand_mesh_fb.bin; chmod 0644 $d/vdhs/hand_mesh_fb.bin; ' +
           'restorecon -RFD $d/vdhs; ls -l $d/vdhs/hand_mesh_fb.bin'
 Invoke-Adb -Arguments @('-s', $Serial, 'shell', "su -c '$remote'")

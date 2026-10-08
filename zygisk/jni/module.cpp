@@ -32,20 +32,23 @@ static const char* kTargetProcess = "VirtualDesktop.Android";
 
 // Files staged from <module>/payload/<name> into <app_data_dir>/vdhs/<basename>.
 // Absent optional entries are removed from the stage so backend/config defaults
-// cannot be overridden by a previous installation.
+// cannot be overridden by a previous installation. The install-if-missing mesh
+// is the exception: a user's existing copy is preserved.
 struct StagedFile {
     const char* name;
     bool required;
     int fd;
+    bool install_if_missing;
 };
 
 static StagedFile g_files[] = {
-    {"payload/libvdhs.so", true, -1},
-    {"payload/VdHsMod.dll", true, -1},
-    {"payload/Xenko.OpenXR.patched.dll", false, -1},
-    {"payload/0Harmony.dll", false, -1},
-    {"payload/backend.txt", false, -1},
-    {"payload/mode.txt", false, -1},
+    {"payload/libvdhs.so", true, -1, false},
+    {"payload/VdHsMod.dll", true, -1, false},
+    {"payload/Xenko.OpenXR.patched.dll", false, -1, false},
+    {"payload/0Harmony.dll", false, -1, false},
+    {"payload/backend.txt", false, -1, false},
+    {"payload/mode.txt", false, -1, false},
+    {"payload/hand_mesh_fb.bin", false, -1, true},
 };
 static const int g_fileCount = (int)(sizeof(g_files) / sizeof(g_files[0]));
 
@@ -196,6 +199,24 @@ public:
         for (int i = 0; i < g_fileCount; i++) {
             char dst[1200];
             snprintf(dst, sizeof dst, "%s/%s", dir, base_name(g_files[i].name));
+            if (g_files[i].install_if_missing) {
+                // Install the bundled mesh on first launch; keep a user's own mesh on upgrade.
+                struct stat st;
+                if (lstat(dst, &st) == 0) {
+                    if (!S_ISREG(st.st_mode)) {
+                        LOGE("stage: existing mesh is not a regular file: %s", dst);
+                        stage_ok = false;
+                        break;
+                    }
+                    LOGI("stage: preserving existing %s", dst);
+                    continue;
+                }
+                if (errno != ENOENT) {
+                    LOGE("stage stat %s: %s", dst, strerror(errno));
+                    stage_ok = false;
+                    break;
+                }
+            }
             if (g_files[i].fd < 0) {
                 if (unlink(dst) != 0 && errno != ENOENT) {
                     LOGE("stage remove %s: %s", dst, strerror(errno));

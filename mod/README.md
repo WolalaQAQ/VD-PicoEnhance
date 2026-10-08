@@ -28,8 +28,8 @@ dotnet build mod/src/VdHsMod/VdHsMod.csproj -c Release
 pwsh -File zygisk/build.ps1
 ```
 
-The full module is assembled by `zygisk/build.ps1`, which stages `libvdhs.so` +
-`VdHsMod.dll` into `zygisk/payload/`.
+The full module is assembled by `zygisk/build.ps1`, which stages `libvdhs.so`,
+`VdHsMod.dll` and the bundled hand mesh into `zygisk/payload/`.
 
 ## Backends (runtime switch, no rebuild)
 

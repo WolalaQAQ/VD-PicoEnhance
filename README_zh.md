@@ -21,11 +21,11 @@ VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时向 Virtual Desktop 
 |---|---|---|
 | 手追扩展 | 让 Virtual Desktop 看到 `XR_EXT_hand_tracking`，并把该扩展注入应用的托管扩展列表 | 始终开启 |
 | `XR_FB_hand_tracking_aim` | 层内合成捏合、菜单手势与指向射线；runtime 自身 aim 有效时优先使用 | `aim_*`、`pinch_*`、`menu_*` |
-| `XR_FB_hand_tracking_mesh` | 用 `hand_mesh_fb.bin` 提供手部网格（Release 附带，也可用你自己头显的资源生成） | 文件存在即启用 |
+| `XR_FB_hand_tracking_mesh` | 用 `hand_mesh_fb.bin` 提供手部网格（模块内置，也可用你自己头显的资源生成） | 文件存在即启用 |
 | 手/手柄热切换 | 放下手柄切到手，拿起手柄切回 | — |
 | 手部透视（Virtual Desktop 内） | 每只手一个独立的 projected 层；未绘制时恢复背景透视 | `pt_split`、`pt_bg_fix` |
 | 手部透视（SteamVR） | 在 Virtual Desktop 串流画面的 swapchain 上原地改 alpha，只在手的位置开孔；不拷贝、不加层 | `pt_hole`、`pt_follow_settings` |
-| 冻结门控 | runtime 关节数据长时间不更新时，把这只手报告为不活跃，缓解手势"亮一下就消失" | `hj_freeze_ms` |
+| 冻结门控 | runtime 关节数据长时间不更新时，把这只手报告为不活跃，缓解手势"亮一下就消失" | `hj_freeze_ms`（默认 300 ms） |
 | Eye gaze | 仅对界面指针做 One-Euro 平滑、跳变确认和头部姿态补偿；串流眼动透传，两项增强默认开启 | `gaze_filter`、`gaze_vd_fix` |
 
 SteamVR 里开孔的条件与 Virtual Desktop 自身的 `PassthroughPortals` 逻辑一致：串流源为 VR、`VRPassthroughHands` 打开、当前输入是手等。不在 SteamVR 时，模块不改动任何层。
@@ -90,7 +90,7 @@ powershell -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
 ### 手动安装
 
 1. 解压整合包，在 Magisk 里选择 **模块 → 从本地安装**，选择其中的 `vdhs_zygisk.zip`，然后重启头显。
-2. 启动一次 Virtual Desktop，再按下文[手部网格](#手部网格)说明放入 `hand_mesh_fb.bin` 并重启应用。一键安装已包含网格安装。
+2. 启动 Virtual Desktop，模块会自动放置缺失的 `hand_mesh_fb.bin`，无需手动复制。
 
 `payload/mode.txt` 默认为 `2`，即完整兼容层。需要做“只注入、不加载托管层”的对照测试时，把 `/data/adb/modules/vdhs_zygisk/payload/mode.txt` 改成 `1`，重启 Virtual Desktop 生效。
 
@@ -100,9 +100,9 @@ powershell -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
 
 ## 配置
 
-把 [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) 复制到设备上的 `/data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt`，按需修改。每个键都是可选的，缺省时沿用内置默认值；该文件里列出了全部键名与当前建议值。
+默认使用无需配置文件。需要调整功能时，可将 [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) 中的相应条目写入设备上的 `/data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt`。每个键都是可选的，缺省时沿用内置默认值；示例列出了可配置的键与建议值。
 
-SteamVR 手部透视需设置 `pt_hole=1`，并打开 VD 的“VR 手部透视”。界面眼动平滑和头部补偿默认开启；旧配置中的显式设置优先于默认值。保存配置后重启 VD 生效。
+SteamVR 手部透视开孔默认开启（`pt_hole=1`），并跟随 VD 的“VR 手部透视”开关。界面眼动平滑和头部补偿默认开启；已有配置中的显式设置优先于默认值。保存配置后重启 VD 生效。
 
 ### 手部网格
 
@@ -114,7 +114,7 @@ SteamVR 手部透视需设置 `pt_hole=1`，并打开 VD 的“VR 手部透视�
 
 没有这个文件时，模块不向 VD 启用手部网格功能。这个目录在模块运行过一次后已经存在。
 
-**使用 Release 附带的 blob（推荐）**。一键安装脚本会自动放置网格。手动安装时，在 PC 上执行：
+**使用内置网格（推荐）**。通常无需手动复制，已有网格会保留。要替换网格，可通过安装脚本的 `-MeshPath` 参数指定文件，或在 PC 上执行：
 
 ```sh
 adb push hand_mesh_fb.bin /data/local/tmp/

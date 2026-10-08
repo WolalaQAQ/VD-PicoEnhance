@@ -21,11 +21,11 @@ See the [changelog](CHANGELOG.md) for changes in each version.
 |---|---|---|
 | Hand-tracking extension | Makes Virtual Desktop see `XR_EXT_hand_tracking` and injects the extension into the app's managed extension list | always on |
 | `XR_FB_hand_tracking_aim` | Synthesises pinch, menu gesture and pointing ray; the runtime's own aim is preferred when valid | `aim_*`, `pinch_*`, `menu_*` |
-| `XR_FB_hand_tracking_mesh` | Serves a hand mesh from `hand_mesh_fb.bin` (shipped with releases, or generated from your own headset) | enabled when the file exists |
+| `XR_FB_hand_tracking_mesh` | Serves a hand mesh from `hand_mesh_fb.bin` (bundled in the module, or generated from your own headset) | enabled when the file exists |
 | Hand/controller hot-switch | Put the controller down to use hands, pick it up to go back | — |
 | Hand passthrough (in Virtual Desktop) | One projected layer per hand; the background passthrough state is restored when no hole is drawn | `pt_split`, `pt_bg_fix` |
 | Hand passthrough (in SteamVR) | Sets the alpha in place on Virtual Desktop's streamed swapchain, opening a hole only where a hand is; no copy, no extra layer | `pt_hole`, `pt_follow_settings` |
-| Joint freeze gate | Reports a hand as inactive when its joints have not updated for a while, easing the "hand flashes and disappears" behaviour | `hj_freeze_ms` |
+| Joint freeze gate | Reports a hand as inactive when its joints have not updated for a while, easing the "hand flashes and disappears" behaviour | `hj_freeze_ms` (default 300 ms) |
 | Eye gaze | Pointer-only One-Euro smoothing, jump confirmation and head-pose compensation, enabled by default; streaming gaze passes through | `gaze_filter`, `gaze_vd_fix` |
 
 In SteamVR the hole follows the same conditions as Virtual Desktop's own `PassthroughPortals` logic (VR stream source, `VRPassthroughHands` enabled, hands as current input, and so on). Outside SteamVR the module does not touch any layer.
@@ -90,7 +90,7 @@ Useful parameters: `-Mode 1` for an injection-only control run, `-NoReboot` to s
 ### Manual installation
 
 1. Extract the bundle. In Magisk choose **Modules → Install from storage**, select the included `vdhs_zygisk.zip`, then reboot the headset.
-2. Launch Virtual Desktop once, install `hand_mesh_fb.bin` as described under [Hand mesh](#hand-mesh), then restart the app. The one-shot installer includes mesh installation.
+2. Launch Virtual Desktop. The module installs `hand_mesh_fb.bin` if missing; no manual copy is needed.
 
 `payload/mode.txt` defaults to `2`, the full layer. For a control run that only injects and does not load the managed layer, change `/data/adb/modules/vdhs_zygisk/payload/mode.txt` to `1` and restart Virtual Desktop.
 
@@ -100,9 +100,9 @@ To upgrade, run the installer from the new bundle to install the full module, th
 
 ## Configuration
 
-Copy [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) to `/data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt` on the headset and adjust it as needed. Every key is optional; a missing key keeps its built-in default. The example lists all key names with the currently recommended values.
+No configuration file is needed for the defaults. To adjust a feature, copy the relevant entries from [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) into `/data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt` on the headset. Every key is optional; a missing key keeps its built-in default. The example lists configurable keys and suggested values.
 
-For SteamVR hand passthrough, set `pt_hole=1` and enable VD's VR hand-passthrough setting. UI gaze smoothing and head-pose compensation are enabled by default; explicit values in an existing configuration override the defaults. Restart VD after saving changes.
+SteamVR hand-passthrough holes are enabled by default (`pt_hole=1`) and follow VD's VR hand-passthrough setting. UI gaze smoothing and head-pose compensation are enabled by default; explicit values in an existing configuration override the defaults. Restart VD after saving changes.
 
 ### Hand mesh
 
@@ -114,7 +114,7 @@ For SteamVR hand passthrough, set `pt_hole=1` and enable VD's VR hand-passthroug
 
 Without this file, the module does not enable VD's hand-mesh feature. The directory already exists once the module has run.
 
-**Use the blob from a release (recommended).** The one-shot installer places it automatically. For manual installation, run on the PC:
+**Use the bundled mesh (recommended).** No manual copy is normally needed, and existing meshes are preserved. To replace a mesh, pass its path with the installer's `-MeshPath` parameter or run on the PC:
 
 ```sh
 adb push hand_mesh_fb.bin /data/local/tmp/

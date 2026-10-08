@@ -20,9 +20,9 @@
 // Hand joints come from vdhs_hand.c's latest valid locate snapshot (same space
 // as the projection layer). Frozen or stale data is not drawn.
 //
-// Disabled unless hand_gesture.txt sets pt_hole=1 (draw) or pt_alpha_only=1
-// (OR 0x6 into the projection layer flags only, to probe whether VD's alpha is
-// 1 outside the hands).
+// Drawing is enabled by default; hand_gesture.txt can disable it with pt_hole=0.
+// pt_alpha_only=1 is an opt-in diagnostic that only ORs 0x6 into the projection
+// layer flags to probe whether VD's alpha is 1 outside the hands.
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <math.h>

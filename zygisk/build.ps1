@@ -11,6 +11,7 @@
 #   zygisk/payload/libvdhs.so           shared native payload
 #   zygisk/payload/VdHsMod.dll          managed mod
 #   zygisk/payload/backend.txt          backend selection
+#   zygisk/payload/hand_mesh_fb.bin     bundled mesh, installed on first app launch
 #   zygisk/payload/0Harmony.dll         (optional)
 #   zygisk/payload/Xenko.OpenXR.patched.dll (optional, redirect backend)
 #
@@ -57,6 +58,8 @@ $ModSrc      = Join-Path $ModuleRoot 'jni'
 $ModBuild    = Join-Path $ModSrc 'build-arm64'
 $OutZygisk   = Join-Path $ModuleRoot 'zygisk'
 $OutPayload  = Join-Path $ModuleRoot 'payload'
+$HandMesh    = Join-Path $RepoRoot 'assets\mesh\hand_mesh_fb.bin'
+if (-not (Test-Path -LiteralPath $HandMesh -PathType Leaf)) { throw "missing hand mesh: $HandMesh" }
 
 function Build-CMake([string]$src, [string]$build) {
     if ($Clean -and (Test-Path $build)) { Remove-Item -Recurse -Force $build }
@@ -86,6 +89,7 @@ New-Item -ItemType Directory -Force -Path $OutZygisk, $OutPayload | Out-Null
 Copy-Item (Join-Path $ModBuild 'arm64-v8a.so')    (Join-Path $OutZygisk 'arm64-v8a.so') -Force
 Copy-Item (Join-Path $NativeBuild 'libvdhs.so')   (Join-Path $OutPayload 'libvdhs.so') -Force
 Copy-Item (Join-Path $ReleaseDir 'VdHsMod.dll')   (Join-Path $OutPayload 'VdHsMod.dll') -Force
+Copy-Item -LiteralPath $HandMesh -Destination (Join-Path $OutPayload 'hand_mesh_fb.bin') -Force
 
 if ($Harmony) {
     $net35 = Join-Path $env:USERPROFILE '.nuget\packages\lib.harmony\2.3.5\lib\net35\0Harmony.dll'

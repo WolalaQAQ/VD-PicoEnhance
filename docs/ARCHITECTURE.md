@@ -28,7 +28,8 @@ Magisk / Zygisk
 - `zygisk/jni/module.cpp` is the injector. It targets the real package name
   `VirtualDesktop.Android`, exempts the payload fds across app specialization,
   copies the payload into the app's private data dir and calls the native entry
-  point. No C++ STL is used (Zygisk requires `APP_STL=none`).
+  point. The bundled hand mesh is installed only when missing, preserving a
+  user's custom mesh. No C++ STL is used (Zygisk requires `APP_STL=none`).
 - `mod/native/` builds a single shared payload, `libvdhs.so`.
 - `mod/src/VdHsMod/` is loader-agnostic C#: it holds **zero compile-time
   reference** to any Virtual Desktop / Xenko / Mono.Android assembly. Everything
@@ -73,9 +74,11 @@ the runtime's own aim is valid it is used instead.
 ### 2.3 Hand mesh
 
 `xrGetHandMeshFB` is served from `hand_mesh_fb.bin`, an OpenXR `XR_FB_hand_tracking_mesh`
-blob converted offline from the headset's own PICO hand mesh. That blob is a
-PICO system resource and is **not** committed here; without it, the mesh
-extension is simply not advertised. See `tools/mesh/xrshell_mesh.py`.
+blob converted offline from the headset's own PICO hand mesh. The module bundles
+the blob from `assets/mesh/` and installs it automatically when missing. Its
+provenance and redistribution disclaimer are in `assets/mesh/README.md`.
+Without a usable blob, the mesh extension is not advertised. See
+`tools/mesh/xrshell_mesh.py`.
 
 ### 2.4 Hand passthrough
 
@@ -147,6 +150,13 @@ assembly you already produced for your own device.
   `1` for a control run that leaves the managed runtime untouched.
 - `payload/backend.txt` (and `VDHS_BACKEND`): managed backend, above.
 - `<app_data>/vdhs/hand_gesture.txt`: the runtime feature toggles.
+
+No feature configuration file is needed for a fresh installation. User-facing
+features default on, including `pt_bg_fix`, `pt_split`, `pt_hole`,
+`gaze_filter`, `gaze_vd_fix`, and the 300 ms joint freeze gate. SteamVR drawing
+still follows VD's own settings (`pt_follow_settings=1`). Diagnostic switches
+(`gaze_log`, `hj_diag_ms`, `pt_alpha_only`, `pt_style`) default off. Existing explicit
+configuration values take precedence; the module never rewrites that file.
 
 ## 6. Robustness contract
 

@@ -46,8 +46,9 @@ directory:
 /data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin
 ```
 
-The one-shot installer places this file automatically. For manual installation,
-launch Virtual Desktop once after installing the module, then close it. On the PC:
+The module installs the bundled mesh on app launch if missing; the one-shot
+installer also places it when missing. Existing meshes are preserved. To replace
+one manually, close Virtual Desktop and run on the PC:
 
 ```sh
 adb push hand_mesh_fb.bin /data/local/tmp/
@@ -72,7 +73,7 @@ exit
 ```
 
 The directory must belong to the app so the injector can write its payload on
-the next launch. Restart Virtual Desktop afterwards. If the mesh file is absent,
+the next launch. Restart Virtual Desktop afterwards. Without a usable mesh file,
 the module does not enable VD's hand-mesh feature.
 
 To generate a blob from your own headset's XRShell APK, install Python and numpy,
@@ -89,6 +90,6 @@ Install `out/hand_mesh_fb.bin` using the steps above.
 `XRShell.apk` and its mesh are the property of PICO. This file is redistributed
 solely to make an interoperability feature of an unmodified third-party
 application work, with no affiliation with or endorsement by PICO, and it will
-be removed on request. If you prefer not to use it, delete this file and either
-generate your own copy from your device with `tools/mesh/xrshell_mesh.py`, or
-run without the hand mesh.
+be removed on request. If you prefer not to use it, replace it with a copy
+generated from your device using `tools/mesh/xrshell_mesh.py`. To run without a
+mesh, remove both the module's `payload/hand_mesh_fb.bin` and the staged copy.

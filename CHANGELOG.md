@@ -2,6 +2,14 @@
 
 English | [简体中文](CHANGELOG_zh.md)
 
+## 1.0.6 — 2026-10-08
+
+- Enable all implemented user-facing features by default, including SteamVR hand-passthrough holes (`pt_hole=1`) and the 300 ms joint freeze gate. Default the hole radius to 0.1 m to match VD's hand window.
+- Bundle the mesh in the Magisk ZIP and let Zygisk install it when missing on first launch; manual module installation no longer needs a mesh-copy step. Preserve custom meshes unless an explicit installer `-MeshPath` replaces one.
+- Keep explicit `hand_gesture.txt` settings. SteamVR hand passthrough still follows VD's own switch without forcing app settings. Debug logging, alpha-only diagnostics and the `pt_style` A/B diagnostic default off.
+- Managed and native builds complete without warnings; module packaging, shell/PowerShell syntax checks and public-content checks pass.
+- These defaults and automatic mesh installation have not yet been validated on a headset.
+
 ## 1.0.5 — 2026-10-03
 
 - GitHub Actions builds, packages and publishes the complete installer bundle when a version tag is pushed. Each release now publishes only `VD-PicoEnhance-v<version>.zip`; the installer, module ZIP, mesh, license notices and checksums are all inside it.

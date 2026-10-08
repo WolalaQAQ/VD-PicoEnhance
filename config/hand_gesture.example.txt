@@ -10,13 +10,14 @@
 #   Every key is optional. Missing keys keep their built-in default, so you can
 #   ship a two-line file.
 #
-# This file is an EXAMPLE, not the shipped runtime default. Copy the lines you
-# need, do not copy it verbatim unless you want all of these behaviours.
+# All user-facing features are enabled without this file. Copy only the lines
+# you want to override; explicit existing values take precedence on upgrades.
+# Debug diagnostics remain opt-in. Tuning examples are not all runtime defaults.
 # ---------------------------------------------------------------------------
 
 # --- Hand passthrough -------------------------------------------------------
 # Write a see-through hole into VD's own VR projection image where each hand is.
-# 0/absent = off; 1 = on. This is the SteamVR hand-passthrough feature.
+# 0 = off; 1/absent = on. This is the SteamVR hand-passthrough feature.
 pt_hole = 1
 
 # Follow VD's own "VR passthrough hands" setting instead of always drawing.
@@ -27,21 +28,21 @@ pt_follow_settings = 1
 pt_bg_fix = 1
 
 # Split the two hands into two separate projected layers (PICO keeps one
-# geometry per layer). Set 1 if one hand's hole covers the other.
-# pt_split = 1
+# geometry per layer). Enabled by default so both hands remain visible.
+pt_split = 1
 
 # Hole shape / placement tuning (rarely needed):
 # pt_disc_r     = 0.1     # disc radius, metres
 # pt_margin_px  = 0       # extra pixels around the disc
 # pt_flip_y     = 0       # flip the disc's vertical axis
-# pt_style      = 1       # draw style variant
 # pt_max_age_ms = 100     # discard hand data older than this
 # pt_alpha_only = 0       # debug: only OR the alpha flags, draw no hole
+# pt_style      = 0       # A/B opacity diagnostic; leave off for normal use
 
 # --- Hand joint freeze gate -------------------------------------------------
 # PICO occasionally freezes hand joints (the hand "flashes" and disappears).
 # When a joint has not moved for this many ms, report that hand as inactive.
-# 0 = disabled.
+# Enabled by default at 300 ms; 0 = disabled.
 hj_freeze_ms = 300
 
 # --- Eye gaze ---------------------------------------------------------------
@@ -52,7 +53,7 @@ hj_freeze_ms = 300
 # Compensation defaults to 1 in v1.0.4; set 0 to disable it for the pointer.
 # On v1.0.3, use BOTH gaze_vd_fix=0 and gaze_filter=0 for raw streaming gaze.
 gaze_vd_fix = 1
-# gaze_filter   = 1
+gaze_filter = 1
 # gaze_beta     = 0.01    # One-Euro beta
 # gaze_mincutoff = 1.0    # One-Euro minimum cutoff (Hz)
 # gaze_jump_deg = 8       # treat a jump larger than this as a new fixation

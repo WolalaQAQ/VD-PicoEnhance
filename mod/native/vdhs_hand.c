@@ -451,7 +451,7 @@ static struct {
     // Zero-copy alpha hole in the VR projection swapchain. pt_hole
     // draws the joint balls (scissor-limited, alpha only); pt_alpha_only only
     // ORs 0x6 into the projection layer flags to probe whether VD's alpha is 1
-    // outside the hands. Both default off.
+    // outside the hands. Drawing defaults on; the diagnostic stays off.
     float pt_hole, pt_alpha_only;
     float pt_flip_y;           // 1 = mirror the projection in y (VD's VerticalFlip; default on)
     float pt_margin_px;        // scissor rectangle expansion, pixels
@@ -459,11 +459,24 @@ static struct {
     float pt_max_age_ms;       // locate snapshot older than this is not drawn
     float pt_follow_settings;  // 1 = only in SteamVR with VD's "Passthrough hands" on (vdhs_hand_pt_gate)
     float gaze_vd_fix;         // 1 = pre-compensate verified VD pointer calls only (never GetEyeState/streaming)
-} G = { PINCH_ON_CM_DEFAULT, PINCH_OFF_CM_DEFAULT, PINCH_FULL_CM_DEFAULT,
-        40.0f, 55.0f, 400.0f, 700.0f, 0.7f, 0.2f, 0.5f,
-        40.0f, 0.6f, 0.70f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 1.0f,
-        1.0f, 1.0f, 0.5f, 150.0f, 25.0f, 250.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 8.0f, 0.11f, 300.0f, 1.0f, 1.0f };
+} G = {
+    .pinch_on_cm = PINCH_ON_CM_DEFAULT,
+    .pinch_off_cm = PINCH_OFF_CM_DEFAULT,
+    .pinch_full_cm = PINCH_FULL_CM_DEFAULT,
+    .face_on_deg = 40.0f, .face_off_deg = 55.0f,
+    .menu_hold_ms = 400.0f, .menu_cooldown_ms = 700.0f,
+    .ext_dot = 0.7f, .curl_dot = 0.2f, .aim_smooth = 0.5f,
+    .menu_face_deg = 40.0f, .menu_pinch_cm = 0.6f, .menu_ext_dot = 0.70f,
+    .aim_shoulder = 1.0f, .aim_pitch_deg = 0.0f, .aim_runtime = 1.0f,
+    .pt_style = 0.0f, .pt_bg_fix = 1.0f, .pt_split = 1.0f,
+    .gaze_log = 0.0f,
+    .gaze_filter = 1.0f, .gaze_mincutoff = 1.0f, .gaze_beta = 0.5f,
+    .gaze_hold_ms = 150.0f, .gaze_jump_deg = 25.0f,
+    .hj_diag_ms = 0.0f, .hj_freeze_ms = 300.0f,
+    .pt_hole = 1.0f, .pt_alpha_only = 0.0f,
+    .pt_flip_y = 1.0f, .pt_margin_px = 8.0f, .pt_disc_r = 0.1f,
+    .pt_max_age_ms = 300.0f, .pt_follow_settings = 1.0f, .gaze_vd_fix = 1.0f
+};
 
 static void payload_path(const char* file, char* out, size_t cap) {
     out[0] = 0;
