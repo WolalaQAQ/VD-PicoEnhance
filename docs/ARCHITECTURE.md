@@ -109,6 +109,12 @@ no-IL stack walker to identify the immediate managed consumer:
 - `OpenXRHMD.GetEyeState`: pass through for foveated streaming / tracking forwarding.
 - Unknown callers or unavailable metadata: pass through.
 
+The walker and its metadata callbacks run inside a balanced Mono GC-unsafe
+region, restoring the incoming thread state afterward. P/Invoke threads are
+attached but GC-safe; a cold AOT stack lookup can contend on a cooperative mutex
+and must not attempt a second GC-safe transition from that state. If either
+transition API is unavailable, classification returns unknown without walking.
+
 Streaming returns immediately after classification, retaining the original
 upstream pose and validity flags, with no extra filter, jump confirmation, sample
 hold or coordinate compensation. It also skips the pointer diagnostic's extra

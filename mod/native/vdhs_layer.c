@@ -970,6 +970,8 @@ static struct {
     const char* (*class_get_name)(void*);
     const char* (*class_get_namespace)(void*);
     const char* (*image_get_name)(void*);
+    void* (*enter_gc_unsafe_region)(void**);
+    void (*exit_gc_unsafe_region)(void*, void**);
 } GM;
 static pthread_once_t g_gaze_mono_once = PTHREAD_ONCE_INIT;
 static int g_gaze_mono_ready;
@@ -978,6 +980,7 @@ static void gaze_mono_init(void) {
     static const char* const names[] = {
         "mono_stack_walk_no_il", "mono_method_get_class", "mono_method_get_name",
         "mono_class_get_image", "mono_class_get_name", "mono_class_get_namespace", "mono_image_get_name",
+        "mono_threads_enter_gc_unsafe_region", "mono_threads_exit_gc_unsafe_region",
     };
     _Static_assert(sizeof names / sizeof names[0] == sizeof GM / sizeof(void*), "GM slots vs names");
     void** slots = (void**)&GM;
@@ -1022,7 +1025,16 @@ static int gaze_caller(void) {
     pthread_once(&g_gaze_mono_once, gaze_mono_init);
     if (!g_gaze_mono_ready) return GAZE_CALLER_UNKNOWN;
     GazeCallerWalk w = { 0, 0, GAZE_CALLER_UNKNOWN };
+    // xrLocateSpace is entered through a P/Invoke: this thread is attached but
+    // GC-safe (STATE_BLOCKING). mono_stack_walk_no_il does NOT enter GC-unsafe
+    // mode itself. A cold AOT lookup can take a contended cooperative mutex;
+    // its GC-safe transition would otherwise abort with BLOCKING/DO_BLOCKING.
+    // Keep the stack marker alive across the walk, including its metadata
+    // callbacks, and restore the incoming state before returning to OpenXR.
+    void* stack_marker = NULL;
+    void* cookie = GM.enter_gc_unsafe_region(&stack_marker);
     GM.stack_walk_no_il(gaze_caller_frame, &w);
+    GM.exit_gc_unsafe_region(cookie, &stack_marker);
     return w.caller;
 }
 

@@ -2,6 +2,11 @@
 
 English | [简体中文](CHANGELOG_zh.md)
 
+## 1.0.7 — 2026-10-10
+
+- Balance Mono GC thread-state transitions around gaze-consumer stack walks, correcting the `STATE_BLOCKING / DO_BLOCKING` abort path when the first gaze queries race on entering SteamVR. Skip pointer enhancements if the transition APIs are unavailable; streaming gaze retains upstream results.
+- On 2026-10-10, two app launches followed by SteamVR entry passed on PICO 4 Pro / VD 1.34.22.0 with PicoET dual/on. The user confirmed no crash and manually exited both runs. One run logged HMD-only input; both completed their first concurrent gaze classifications, with no new crash-buffer entries after installation. Long-duration stability has not yet been assessed.
+
 ## 1.0.6 — 2026-10-08
 
 - Enable all implemented user-facing features by default, including SteamVR hand-passthrough holes (`pt_hole=1`) and the 300 ms joint freeze gate. Default the hole radius to 0.1 m to match VD's hand window.
