@@ -26,6 +26,7 @@
 #include <time.h>
 #include <android/log.h>
 
+#include "vdhs_caps.h"
 #include "vdhs_layer.h"
 
 #define TAG "vdhs-layer"
@@ -1149,6 +1150,7 @@ static int prop_set(MP klass, MP self, const char* name, void* arg) {
 // permission. Must run after DeterminePlatform (VrApp.OnCreate) and before
 // ControlPanel.LoadContent builds the tabs; xrCreateInstance is in between.
 int vdhs_hand_fix_permissions(void) {
+    if (!vdhs_caps_fix_face_permission()) return 0;
     if (!mono_resolve()) return -1;
     static const char kPicoEye[] = "com.picovr.permission.EYE_TRACKING";
     int rc = 0;
@@ -1163,8 +1165,9 @@ int vdhs_hand_fix_permissions(void) {
         char* eye = obj_to_utf8(prop_get(ds, def, "EyeTrackingPermission"));
         LOGI("perm: DynamicSettings eye=%s face=%s", eye ? eye : "(null)", face ? face : "(null)");
         if (face && strcmp(face, "com.oculus.permission.FACE_TRACKING") == 0 && eye && strstr(eye, "picovr")) {
-            // Face tracking on PICO has no Android permission VD knows about;
-            // use the granted PICO eye-tracking one so the gate passes.
+            // Keep the original PICO compatibility alias unless the firmware
+            // explicitly reports no ET/FT hardware. VD still checks the grant;
+            // this neither grants a permission nor starts a face tracker.
             MP s = M.string_new(M.domain_get(), kPicoEye);
             int r = prop_set(ds, def, "FaceTrackingPermission", s);
             char* now = obj_to_utf8(prop_get(ds, def, "FaceTrackingPermission"));
@@ -1196,6 +1199,8 @@ static MP user_settings(void) {
     return us ? prop_get(us, NULL, "Default") : NULL;
 }
 void vdhs_hand_capture_settings(void) {
+    if (g_saved_eye_gaze != -1) return;
+    if (!vdhs_caps_capture_eye_settings()) return;
     if (!mono_resolve()) return;
     MP def = user_settings();
     MP v = def ? prop_get(M.object_get_class(def), def, "PreferEyeGazeInput") : NULL;
@@ -1205,7 +1210,7 @@ void vdhs_hand_capture_settings(void) {
 // After InputTab's permission name is fixed: put the saved value back through
 // the property setter, so the checkbox, the save file and the HMD agree.
 static void restore_eye_gaze(void) {
-    if (g_saved_eye_gaze != 1) return;
+    if (!vdhs_caps_eye_supported() || g_saved_eye_gaze != 1) return;
     MP def = user_settings();
     if (!def) return;
     MP k = M.object_get_class(def);
@@ -1367,6 +1372,7 @@ int vdhs_hand_pt_gate(uint64_t* chains, int max, int* nchains, int hint_on) {
 // Re-point InputTab._eyeTrackingPermission (private static) at the PICO
 // permission. Idempotent; called whenever the layer gets a chance on VD's thread.
 int vdhs_hand_fix_inputtab(void) {
+    if (!vdhs_caps_eye_supported()) return 0;
     if (!mono_resolve()) return -1;
     MP img = find_image("VirtualDesktop.Mobile");
     MP it = img ? M.class_from_name(img, "VirtualDesktop.Mobile", "InputTab") : NULL;

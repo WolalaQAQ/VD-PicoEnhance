@@ -11,6 +11,7 @@
 // No C++ STL is used (the Zygisk sample requires APP_STL=none); only libc.
 #include <sys/types.h>   // dev_t / ino_t used by zygisk.hpp before it includes them
 #include "zygisk.hpp"
+#include "vdhs_module_config.h"
 
 #include <android/log.h>
 #include <dlfcn.h>
@@ -29,6 +30,7 @@
 
 // Observed from the untouched official APK (Virtual Desktop_1.34.22.0.apk).
 static const char* kTargetProcess = "VirtualDesktop.Android";
+static const char* kShellProcess = "com.picoxr.xrshell";
 
 // Files staged from <module>/payload/<name> into <app_data_dir>/vdhs/<basename>.
 // Absent optional entries are removed from the stage so backend/config defaults
@@ -51,9 +53,27 @@ static StagedFile g_files[] = {
     {"payload/hand_mesh_fb.bin", false, -1, true},
 };
 static const int g_fileCount = (int)(sizeof(g_files) / sizeof(g_files[0]));
+static StagedFile g_shell_files[] = {
+    {"payload/libvdhs_shell.so", true, -1, false},
+};
+static StagedFile* g_active = g_files;
+static int g_active_count = g_fileCount;
 
 static bool g_target = false;
 static bool g_sources_ok = false;
+static bool g_shell = false;
+static int g_mode = 2;
+
+static int read_module_setting(int directory, const char* name, int fallback) {
+    int fd = openat(directory, name, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return errno == ENOENT ? fallback : 0;
+    FILE* stream = fdopen(fd, "r");
+    if (!stream) { close(fd); return 0; }
+    int value = vdhs_config_read(stream, fallback);
+    if (ferror(stream)) value = 0;
+    fclose(stream);
+    return value;
+}
 
 static const char* base_name(const char* path) {
     const char* slash = strrchr(path, '/');
@@ -94,9 +114,9 @@ static bool copy_fd_to_file(int fd, const char* dst) {
 }
 
 static void close_staged_fds() {
-    for (int i = 0; i < g_fileCount; i++) {
-        if (g_files[i].fd >= 0) close(g_files[i].fd);
-        g_files[i].fd = -1;
+    for (int i = 0; i < g_active_count; i++) {
+        if (g_active[i].fd >= 0) close(g_active[i].fd);
+        g_active[i].fd = -1;
     }
 }
 
@@ -110,52 +130,64 @@ public:
     void preAppSpecialize(zygisk::AppSpecializeArgs* args) override {
         g_target = false;
         g_sources_ok = false;
+        g_shell = false;
         if (!args || !args->nice_name) return;
 
         const char* name = env_->GetStringUTFChars(args->nice_name, nullptr);
         bool match = name && strcmp(name, kTargetProcess) == 0;
+        bool shell = name && strcmp(name, kShellProcess) == 0;
         if (name) env_->ReleaseStringUTFChars(args->nice_name, name);
-        if (!match) return;
-
-        g_target = true;
-        LOGI("preAppSpecialize: target process %s", kTargetProcess);
+        if (!match && !shell) return;
 
         int dir = api_->getModuleDir();
         if (dir < 0) { LOGE("getModuleDir failed"); return; }
 
+        const char* environment_mode = getenv("VDHS_MODE");
+        int fallback_mode = environment_mode && *environment_mode ? atoi(environment_mode) : 2;
+        g_mode = read_module_setting(dir, "payload/mode.txt", fallback_mode);
+        if (shell && !vdhs_shell_requested(g_mode, read_module_setting(dir, "payload/system_gestures.txt", 0))) {
+            close(dir);
+            return;
+        }
+        g_target = true;
+        g_shell = shell;
+        g_active = shell ? g_shell_files : g_files;
+        g_active_count = shell ? (int)(sizeof g_shell_files / sizeof g_shell_files[0]) : g_fileCount;
+        LOGI("preAppSpecialize: target process %s", shell ? kShellProcess : kTargetProcess);
+
         g_sources_ok = true;
-        for (int i = 0; i < g_fileCount; i++) {
-            int fd = openat(dir, g_files[i].name, O_RDONLY | O_CLOEXEC);
+        for (int i = 0; i < g_active_count; i++) {
+            int fd = openat(dir, g_active[i].name, O_RDONLY | O_CLOEXEC);
             if (fd < 0) {
-                if (errno == ENOENT && !g_files[i].required) {
-                    LOGI("stage: optional %s not present", g_files[i].name);
+                if (errno == ENOENT && !g_active[i].required) {
+                    LOGI("stage: optional %s not present", g_active[i].name);
                 } else {
-                    LOGE("stage open %s: %s", g_files[i].name, strerror(errno));
+                    LOGE("stage open %s: %s", g_active[i].name, strerror(errno));
                     g_sources_ok = false;
                 }
                 continue;
             }
             struct stat st;
             if (fstat(fd, &st) != 0) {
-                LOGE("stage stat %s: %s", g_files[i].name, strerror(errno));
+                LOGE("stage stat %s: %s", g_active[i].name, strerror(errno));
                 close(fd);
                 g_sources_ok = false;
                 continue;
             }
-            if (!S_ISREG(st.st_mode) || (g_files[i].required && st.st_size == 0)) {
-                LOGE("stage: invalid payload file %s", g_files[i].name);
+            if (!S_ISREG(st.st_mode) || (g_active[i].required && st.st_size == 0)) {
+                LOGE("stage: invalid payload file %s", g_active[i].name);
                 close(fd);
                 g_sources_ok = false;
                 continue;
             }
             if (!api_->exemptFd(fd)) {
-                LOGE("stage: exemptFd failed for %s", g_files[i].name);
+                LOGE("stage: exemptFd failed for %s", g_active[i].name);
                 close(fd);
                 g_sources_ok = false;
                 continue;
             }
-            g_files[i].fd = fd;
-            LOGI("stage: %s -> fd %d", g_files[i].name, fd);
+            g_active[i].fd = fd;
+            LOGI("stage: %s -> fd %d", g_active[i].name, fd);
         }
         close(dir);
     }
@@ -196,10 +228,10 @@ public:
 
         int staged = 0;
         bool stage_ok = true;
-        for (int i = 0; i < g_fileCount; i++) {
+        for (int i = 0; i < g_active_count; i++) {
             char dst[1200];
-            snprintf(dst, sizeof dst, "%s/%s", dir, base_name(g_files[i].name));
-            if (g_files[i].install_if_missing) {
+            snprintf(dst, sizeof dst, "%s/%s", dir, base_name(g_active[i].name));
+            if (g_active[i].install_if_missing) {
                 // Install the bundled mesh on first launch; keep a user's own mesh on upgrade.
                 struct stat st;
                 if (lstat(dst, &st) == 0) {
@@ -217,13 +249,13 @@ public:
                     break;
                 }
             }
-            if (g_files[i].fd < 0) {
+            if (g_active[i].fd < 0) {
                 if (unlink(dst) != 0 && errno != ENOENT) {
                     LOGE("stage remove %s: %s", dst, strerror(errno));
                     stage_ok = false;
                     break;
                 }
-            } else if (copy_fd_to_file(g_files[i].fd, dst)) {
+            } else if (copy_fd_to_file(g_active[i].fd, dst)) {
                 staged++;
             } else {
                 LOGE("stage write %s: %s", dst, strerror(errno));
@@ -236,23 +268,20 @@ public:
         LOGI("postAppSpecialize: staged %d file(s) into %s", staged, dir);
 
         char payload[1200];
-        snprintf(payload, sizeof payload, "%s/libvdhs.so", dir);
+        snprintf(payload, sizeof payload, "%s/%s", dir, g_shell ? "libvdhs_shell.so" : "libvdhs.so");
         void* handle = dlopen(payload, RTLD_NOW | RTLD_GLOBAL);
         if (!handle) { LOGE("dlopen %s failed: %s", payload, dlerror()); return; }
 
         typedef int (*PayloadMain)(void*, int);
-        PayloadMain entry = (PayloadMain)dlsym(handle, "vdhs_payload_main");
-        if (!entry) { LOGE("vdhs_payload_main not found in payload"); return; }
+        const char* entry_name = g_shell ? "vdhs_shell_main" : "vdhs_payload_main";
+        PayloadMain entry = (PayloadMain)dlsym(handle, entry_name);
+        if (!entry) { LOGE("%s not found in payload", entry_name); return; }
 
         JavaVM* vm = nullptr;
         env_->GetJavaVM(&vm);
 
-        int mode = 2;
-        const char* m = getenv("VDHS_MODE");
-        if (m && *m) mode = atoi(m);
-
-        int rc = entry(vm, mode);
-        LOGI("postAppSpecialize: payload started rc=%d mode=%d", rc, mode);
+        int rc = entry(vm, g_mode);
+        LOGI("postAppSpecialize: payload started rc=%d mode=%d", rc, g_mode);
     }
 
 private:

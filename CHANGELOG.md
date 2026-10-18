@@ -2,6 +2,25 @@
 
 English | [简体中文](CHANGELOG_zh.md)
 
+## 1.0.8-dev1 — 2026-10-18
+
+### Features
+
+- Detect tracking capabilities instead of deleting the Pro eye-gaze path for headsets without the corresponding hardware. Keep pointer-only gaze enhancements and unmodified streaming gaze.
+- Add opt-in PICO Shell gesture suppression, adapted from PR #1. `payload/system_gestures.txt` defaults to `0`; full mode and a headset reboot are required to enable it.
+- Centralize mapped-object symbol resolution on the already-vendored xDL, keeping each symbol batch bound to one library without force-loading or cross-APK fallback.
+- Write module ZIPs with explicit forward-slash entry names on Windows PowerShell 5.1 and PowerShell 7, with offline archive-content checks.
+
+### Design Rationale
+
+- Keep capability detection separate from input-selection policy. Retain the application-level active-input query; do not add a property fallback, a stationary-controller timeout, or Harmony changes.
+- Apply gesture suppression only at the Shell's per-app decision. Do not add the runtime-service event interceptor, global hand-tracking changes, or process-importance heuristics.
+
+### Notes & Caveats
+
+- This is a source/build candidate, not a published release. It has not been installed or tested on a headset; new device support and Shell behavior still require device validation.
+- Disable gesture suppression or select mode `1`, then reboot to remove an already-installed Shell hook. Restarting VD alone does not unload it.
+
 ## 1.0.7 — 2026-10-10
 
 - Balance Mono GC thread-state transitions around gaze-consumer stack walks, correcting the `STATE_BLOCKING / DO_BLOCKING` abort path when the first gaze queries race on entering SteamVR. Skip pointer enhancements if the transition APIs are unavailable; streaming gaze retains upstream results.

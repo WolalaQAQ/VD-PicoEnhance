@@ -7,7 +7,7 @@ English | [简体中文](README_zh.md)
 
 Brings **PICO optical hand tracking**, **Quest-style hand passthrough** and an **eye-gaze pointer fix** to the **unmodified official** Virtual Desktop (`VirtualDesktop.Android`) on the **PICO 4 Pro**.
 
-VD-PicoEnhance is a Magisk/Zygisk module that injects a small OpenXR compatibility layer into the Virtual Desktop process at runtime. It does not modify, repack, re-sign or rename the Virtual Desktop APK; it only lets the app use PICO features that its bundled loader never asks for.
+VD-PicoEnhance is a Magisk/Zygisk module that injects a small OpenXR compatibility layer into the Virtual Desktop process at runtime. It does not modify, repack, re-sign or rename the Virtual Desktop APK; it only lets the app use PICO features that its bundled loader never asks for. Optional system-gesture suppression loads a separate payload into PICO's Shell and is disabled by default.
 
 > Experimental, requires root, and tied to the Virtual Desktop version. The module hooks a closed-source commercial app and may break when Virtual Desktop updates. Read [Requirements](#requirements), [Known issues](#known-issues) and [Disclaimer](#disclaimer) before installing. This is an independent community project, not affiliated with Virtual Desktop or PICO.
 
@@ -30,6 +30,8 @@ See the [changelog](CHANGELOG.md) for changes in each version.
 
 In SteamVR the hole follows the same conditions as Virtual Desktop's own `PassthroughPortals` logic (VR stream source, `VRPassthroughHands` enabled, hands as current input, and so on). Outside SteamVR the module does not touch any layer.
 
+The current source candidate adds capability gating for ordinary PICO 4 and other headsets without ET/FT hardware while retaining the Pro code. UI gaze fixes require runtime eye-gaze support. A firmware ET/FT hardware flag of `0` skips the PICO face-permission workaround; a missing flag keeps the existing permission-name compatibility behavior without claiming face support. New headset compatibility has not yet been tested on-device.
+
 ## Requirements
 
 | Item | Requirement |
@@ -51,7 +53,7 @@ For the full component breakdown, the hook list, the managed backends and the ro
 
 | Path | Contents |
 |---|---|
-| `mod/native/` | Native payload `libvdhs.so`: `vdhs_payload.c` (Mono embedding loader), `vdhs_layer.c` (OpenXR hooks, gaze), `vdhs_hand.c` (hand tracking, aim/mesh), `vdhs_pt.c` (SteamVR passthrough hole), `vdhs_mark.c`; vendored `third_party/shadowhook-2.0.1/` |
+| `mod/native/` | VD payload `libvdhs.so`, optional Shell payload `libvdhs_shell.so`, tracking-capability policy and shared mapped-symbol resolver; vendored `third_party/shadowhook-2.0.1/` |
 | `mod/src/VdHsMod/` | Managed mod (netstandard2.0, reflection only, no reference to Virtual Desktop assemblies) |
 | `zygisk/` | Magisk/Zygisk module: injector `jni/`, `payload/` (`mode.txt`, `backend.txt`), `build.ps1` |
 | `tools/mesh/` | Converts the headset's own PICO hand mesh into `hand_mesh_fb.bin` |
@@ -103,6 +105,14 @@ To upgrade, run the installer from the new bundle to install the full module, th
 No configuration file is needed for the defaults. To adjust a feature, copy the relevant entries from [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) into `/data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt` on the headset. Every key is optional; a missing key keeps its built-in default. The example lists configurable keys and suggested values.
 
 SteamVR hand-passthrough holes are enabled by default (`pt_hole=1`) and follow VD's VR hand-passthrough setting. UI gaze smoothing and head-pose compensation are enabled by default; explicit values in an existing configuration override the defaults. Restart VD after saving changes.
+
+### System-gesture suppression (experimental, off by default)
+
+The current source candidate provides a module-level `payload/system_gestures.txt`: `0` disables it and `1` enables it. Reboot the headset after changing it. This is not a key in the app-private `hand_gesture.txt`. New installations default to off; upgrades preserve an existing setting.
+
+When enabled, a separate Shell payload attempts to apply PICO's own streaming-app gesture-disable rule to focused VD, suppressing recenter/dock gestures. Other packages retain the original path. It does not inject into the OpenXR runtime service or change the global hand-tracking switch.
+
+The option requires mode `2`. Disabling it or selecting mode `1` also requires a headset reboot to remove an already-resident Shell hook; restarting VD alone does not unload it. This candidate has not been tested on a headset.
 
 ### Hand mesh
 
@@ -164,7 +174,7 @@ Provenance and disclaimer: [`assets/mesh/README.md`](assets/mesh/README.md).
 
 ## Uninstall and rollback
 
-- Quick rollback: set `payload/mode.txt` back to `1` and restart Virtual Desktop; the compatibility layer is skipped entirely.
+- Quick rollback: set `payload/mode.txt` back to `1` and restart Virtual Desktop; the VD compatibility layer is skipped. If Shell gesture suppression was enabled, reboot the headset to remove that resident hook too.
 - Full removal: disable or remove the module in Magisk and reboot.
 
   ```sh
@@ -177,7 +187,8 @@ Provenance and disclaimer: [`assets/mesh/README.md`](assets/mesh/README.md).
 ## Privacy and security
 
 - The module needs **root** and injects code into Virtual Desktop. Use it only on your own device and only with a build you made yourself or trust.
-- The injector stages files into the app's private directory and nothing else. It does not change the APK, manifest, signature or package name, and does not touch other processes.
+- The injector stages payloads into the target app's private directory; it does not change the APK, manifest, signature or package name.
+- Optional gesture suppression also injects into PICO's Shell. It defaults off and does not inject into the OpenXR runtime service.
 - This repository bundles no Virtual Desktop, Xenko, Mono or PICO binaries or sources, with the single exception of the hand mesh blob included in the release bundle; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - When opening an issue, include the headset model, PICO OS version, Virtual Desktop version and sanitized log excerpts. Do not upload device identifiers or signing keys.
 
@@ -186,6 +197,8 @@ Provenance and disclaimer: [`assets/mesh/README.md`](assets/mesh/README.md).
 This is an unofficial, experimental community project. It does not contain, forward or bypass Virtual Desktop, PICO or their licenses, and it modifies no installed app. Using a root module against a third-party app is at your own risk: it can break Virtual Desktop or the device, and you are responsible for complying with the terms of the software you use. "Virtual Desktop" and "PICO" belong to their respective owners and are used here only to describe interoperability.
 
 ## Acknowledgements
+
+- [misaka18848's PICO 4 contribution](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/1): Shell gesture-disable entry point and PowerShell 5.1 ZIP path fix.
 
 - [ShadowHook](https://github.com/bytedance/android-inline-hook): the inline-hook runtime.
 - John "topjohnwu" Wu: the Magisk / Zygisk module API.

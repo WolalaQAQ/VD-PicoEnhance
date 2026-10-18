@@ -30,6 +30,7 @@
 #include <android/log.h>
 
 #include "shadowhook.h"
+#include "vdhs_caps.h"
 #include "vdhs_layer.h"
 
 #define TAG "vdhs-layer"
@@ -631,6 +632,7 @@ static XrResult hk_create_instance(const XrInstanceCreateInfo* ci, XrInstance* o
         // that background thread must never negotiate a runtime itself.
         vdhs_runtime_gipa();
         g_instance = *out;
+        vdhs_caps_begin_instance(copy.enabledExtensionCount, names);
     }
     LOGI("createInstance: final r=%d instance=0x%llx hand_ext=%d", r,
          (unsigned long long)(r == 0 && out ? *out : 0), has_hand || hand_added);
@@ -671,18 +673,22 @@ static XrResult hk_gipa(XrInstance inst, const char* name, PFN_xrVoidFunction* f
     return r;
 }
 
-// Log-only: VD gates all hand code on Features.HandTracking, i.e.
+// VD gates all hand code on Features.HandTracking, i.e.
 // XrSystemHandTrackingPropertiesEXT.supportsHandTracking (XR.cs:397).
 typedef struct XrBaseOutStructure { uint32_t type; void* next; } XrBaseOutStructure;
 typedef struct { uint32_t type; void* next; XrBool32 supportsHandTracking; } XrSystemHandTrackingPropertiesEXT;
 static XrResult hk_get_system_props(XrInstance inst, uint64_t sys, XrBaseOutStructure* props) {
     if (!vdhs_layer_active()) return g_orig_get_system_props(inst, sys, props);
     XrResult r = g_orig_get_system_props(inst, sys, props);
+    vdhs_caps_observe_system_properties(r, props ? props->next : NULL);
+    // An absent/negative early hint must not win over confirmed runtime support.
+    // This is still before InputTab; an already captured saved value is retained.
+    if (vdhs_caps_eye_supported()) vdhs_hand_capture_settings();
     for (XrBaseOutStructure* s = props ? (XrBaseOutStructure*)props->next : NULL; s; s = (XrBaseOutStructure*)s->next) {
         if (s->type == 1000051000u)        // XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT
             LOGI("systemProps: r=%d supportsHandTracking=%u", r, ((XrSystemHandTrackingPropertiesEXT*)s)->supportsHandTracking);
-        else if (s->type == 1000030001u)   // XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT
-            LOGI("systemProps: r=%d supportsEyeGazeInteraction=%u", r, ((XrSystemHandTrackingPropertiesEXT*)s)->supportsHandTracking);
+        else if (s->type == VDHS_CAP_TYPE_EYE_GAZE)
+            LOGI("systemProps: r=%d supportsEyeGazeInteraction=%u", r, ((vdhs_caps_property*)s)->supported);
     }
     return r;
 }
@@ -720,8 +726,8 @@ static XrResult hk_end_frame(XrSession s, const XrFrameEndInfo* fi_vd) {
         int64_t t = now_ms();
         if (t >= next_ms) {
             next_ms = t + 2000;
-            if (!perm_done) perm_done = vdhs_hand_fix_permissions() == 0;
-            vdhs_hand_fix_inputtab();
+            if (!perm_done && vdhs_caps_fix_face_permission()) perm_done = vdhs_hand_fix_permissions() == 0;
+            if (vdhs_caps_eye_supported()) vdhs_hand_fix_inputtab();
         }
     }
     if (!fi) return r;
@@ -1158,7 +1164,7 @@ static void gaze_log_sample(XrHandle base, int64_t time, const XrSpaceLocation* 
 static XrResult hk_locate_space(XrHandle space, XrHandle base, int64_t time, XrSpaceLocation* loc) {
     if (!vdhs_layer_active()) return g_orig_locate_space(space, base, time, loc);
     XrResult r = g_orig_locate_space(space, base, time, loc);
-    if (!g_gaze_space || space != g_gaze_space || !loc || r != 0) return r;
+    if (!vdhs_caps_eye_supported() || !g_gaze_space || space != g_gaze_space || !loc || r != 0) return r;
     static _Thread_local int enabled = -1, filter = -1, vdfix = -1;
     if (enabled < 0) {
         enabled = vdhs_hand_cfg("gaze_log") > 0;

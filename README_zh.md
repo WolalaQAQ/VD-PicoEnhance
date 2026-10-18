@@ -7,7 +7,7 @@
 
 让 **PICO 4 Pro** 上**未经修改的官方** Virtual Desktop（`VirtualDesktop.Android`）用上 **PICO 光学手追**、**Quest 式手部透视**和**眼动手势指针修正**。
 
-VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时向 Virtual Desktop 进程注入一层很小的 OpenXR 兼容层。它不修改、不重签、不改名、也不重打包 Virtual Desktop 的 APK，只是让应用用上厂商自带 loader 从不去申请的 PICO 功能。
+VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时向 Virtual Desktop 进程注入一层很小的 OpenXR 兼容层。它不修改、不重签、不改名、也不重打包 Virtual Desktop 的 APK，只是让应用用上厂商自带 loader 从不去申请的 PICO 功能。可选的系统手势屏蔽另向 PICO Shell 加载独立载荷，默认关闭。
 
 > 实验性，需要 root，且与 Virtual Desktop 版本相关。模块会 hook 一个闭源商业应用，Virtual Desktop 更新后可能失效。安装前请阅读[使用条件](#使用条件)、[已知问题](#已知问题)与[免责声明](#免责声明)。这是独立的社区项目，与 Virtual Desktop、PICO 官方无关。
 
@@ -30,6 +30,8 @@ VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时向 Virtual Desktop 
 
 SteamVR 里开孔的条件与 Virtual Desktop 自身的 `PassthroughPortals` 逻辑一致：串流源为 VR、`VRPassthroughHands` 打开、当前输入是手等。不在 SteamVR 时，模块不改动任何层。
 
+当前源码候选增加能力门控，面向普通 PICO 4 等缺少眼追／面捕硬件的设备，同时保留 Pro 代码。界面眼动修正要求运行时确认 gaze 支持；固件明确报告 ET/FT 硬件为 `0` 时跳过 PICO 面捕权限兼容。属性缺失时保留原权限名兼容行为，不因此宣称设备支持面捕。新增机型兼容尚未完成真机验证。
+
 ## 使用条件
 
 | 组件 | 要求 |
@@ -51,7 +53,7 @@ Zygisk 模块匹配 Virtual Desktop 进程，把原生载荷 `libvdhs.so` 与托
 
 | 路径 | 内容 |
 |---|---|
-| `mod/native/` | 原生载荷 `libvdhs.so`：`vdhs_payload.c`（Mono 嵌入加载器）、`vdhs_layer.c`（OpenXR hook、gaze）、`vdhs_hand.c`（手追、aim/mesh）、`vdhs_pt.c`（SteamVR 透视开孔）、`vdhs_mark.c`；内置 `third_party/shadowhook-2.0.1/` |
+| `mod/native/` | VD 载荷 `libvdhs.so`、可选 Shell 载荷 `libvdhs_shell.so`、追踪能力策略和共用已映射符号解析器；内置 `third_party/shadowhook-2.0.1/` |
 | `mod/src/VdHsMod/` | 托管 mod（netstandard2.0，全程反射，不引用 Virtual Desktop 程序集） |
 | `zygisk/` | Magisk/Zygisk 模块：注入器 `jni/`、`payload/`（`mode.txt`、`backend.txt`）、`build.ps1` |
 | `tools/mesh/` | 把头显自己的 PICO 手部 mesh 转成 `hand_mesh_fb.bin` |
@@ -103,6 +105,14 @@ powershell -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
 默认使用无需配置文件。需要调整功能时，可将 [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) 中的相应条目写入设备上的 `/data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt`。每个键都是可选的，缺省时沿用内置默认值；示例列出了可配置的键与建议值。
 
 SteamVR 手部透视开孔默认开启（`pt_hole=1`），并跟随 VD 的“VR 手部透视”开关。界面眼动平滑和头部补偿默认开启；已有配置中的显式设置优先于默认值。保存配置后重启 VD 生效。
+
+### 系统手势屏蔽（实验性，默认关闭）
+
+当前源码候选提供模块级 `payload/system_gestures.txt`：`0` 关闭、`1` 开启，修改后需整机重启。它不是应用私有目录 `hand_gesture.txt` 的键。首次安装默认关闭，升级保留已有设置。
+
+开启后，独立 Shell 载荷尝试让系统对 VD 使用与 PICO 自家串流应用相同的手势禁用判定，阻止 VD 聚焦时的重定位／Dock 手势；其他包沿用原逻辑。不向 OpenXR runtime 服务注入载荷，不修改全局手追开关。
+
+该选项要求模式 `2`。关闭或切到模式 `1` 后也需整机重启，才能移除已驻留的 Shell hook；仅重启 VD 不会卸载它。此候选尚未进行头显测试。
 
 ### 手部网格
 
@@ -164,7 +174,7 @@ python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
 
 ## 卸载与回滚
 
-- 快速回滚：把 `payload/mode.txt` 改回 `1`，重启 Virtual Desktop，兼容层会被完全跳过。
+- 快速回滚：把 `payload/mode.txt` 改回 `1`，重启 Virtual Desktop，VD 兼容层会被跳过。若启用过 Shell 手势屏蔽，还需整机重启才能移除该常驻 hook。
 - 彻底删除：在 Magisk 里禁用或移除模块并重启。
 
   ```sh
@@ -177,7 +187,8 @@ python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
 ## 隐私与安全
 
 - 模块需要 **root**，并向 Virtual Desktop 注入代码。请只在自己的设备上，安装你自行构建或信任的版本。
-- 注入器只把文件 stage 到应用私有目录，不写别的位置；不改 APK、清单、签名或包名，也不动其他进程。
+- 注入器将载荷放入目标应用的私有目录，不改 APK、清单、签名或包名。
+- 可选的手势屏蔽还会向 PICO Shell 注入载荷，默认关闭，不向 OpenXR runtime 服务注入。
 - 本仓库不打包任何 Virtual Desktop、Xenko、Mono 或 PICO 的二进制或源码，唯一的例外是 Release 整合包内的手部 mesh blob，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 - 提交 Issue 时请给出头显型号、PICO OS、Virtual Desktop 版本和脱敏后的日志片段，不要上传设备标识或签名密钥。
 
@@ -186,6 +197,8 @@ python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
 这是非官方的实验性社区项目。它不包含、不转发、也不绕过 Virtual Desktop、PICO 及其授权，不修改任何已安装应用。对第三方应用使用 root 模块由你自行承担风险：可能弄坏 Virtual Desktop 或设备，也需要你自行遵守所用软件的条款。"Virtual Desktop" 与 "PICO" 归各自所有方所有，此处仅用于描述互操作性。
 
 ## 致谢
+
+- [misaka18848 的 PICO 4 贡献](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/1)：Shell 手势禁用入口与 PowerShell 5.1 ZIP 路径修正。
 
 - [ShadowHook](https://github.com/bytedance/android-inline-hook)：inline hook 运行时。
 - John "topjohnwu" Wu：Magisk / Zygisk 模块 API。

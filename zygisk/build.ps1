@@ -88,6 +88,7 @@ New-Item -ItemType Directory -Force -Path $OutZygisk, $OutPayload | Out-Null
 
 Copy-Item (Join-Path $ModBuild 'arm64-v8a.so')    (Join-Path $OutZygisk 'arm64-v8a.so') -Force
 Copy-Item (Join-Path $NativeBuild 'libvdhs.so')   (Join-Path $OutPayload 'libvdhs.so') -Force
+Copy-Item (Join-Path $NativeBuild 'libvdhs_shell.so') (Join-Path $OutPayload 'libvdhs_shell.so') -Force
 Copy-Item (Join-Path $ReleaseDir 'VdHsMod.dll')   (Join-Path $OutPayload 'VdHsMod.dll') -Force
 Copy-Item -LiteralPath $HandMesh -Destination (Join-Path $OutPayload 'hand_mesh_fb.bin') -Force
 
@@ -127,7 +128,7 @@ if ($Pack) {
     }
     Copy-Item $OutZygisk (Join-Path $stage 'zygisk') -Recurse -Force
     Copy-Item $OutPayload (Join-Path $stage 'payload') -Recurse -Force
-    Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -Force
+    & (Join-Path $RepoRoot 'tools/pack-module.ps1') -StagePath $stage -ZipPath $zip
     Remove-Item -Recurse -Force $stage
     Write-Host "packed: $zip"
 }

@@ -13,9 +13,9 @@ int vdhs_hand_mesh_ready(void);   // 1 when hand_mesh_fb.bin next to libvdhs.so 
 int vdhs_hand_gipa_self(const char* name, void (**fn)(void));   // 1 = served by the layer
 int vdhs_hand_gipa_wrap(const char* name, void (**fn)(void));   // 1 = downstream wrapped
 int vdhs_hand_inject_managed(const int32_t* values, int count); // add to XR._supportedExtensions
-int vdhs_hand_fix_permissions(void); // DynamicSettings.FaceTrackingPermission -> PICO eye perm; 0 ok
-int vdhs_hand_fix_inputtab(void);    // InputTab._eyeTrackingPermission -> PICO eye perm; 1 changed
-void vdhs_hand_capture_settings(void); // remember saved PreferEyeGazeInput before the UI clears it
+int vdhs_hand_fix_permissions(void); // PICO ET/FT not explicitly absent: legacy face gate alias; 0 ok/skipped
+int vdhs_hand_fix_inputtab(void);    // confirmed eye only: InputTab permission -> PICO eye perm; 1 changed
+void vdhs_hand_capture_settings(void); // read saved PreferEyeGazeInput; restore requires confirmed eye
 float vdhs_hand_cfg(const char* key);  // hand_gesture.txt value (pt_style, pt_bg_fix, gaze_log, pt_hole, ...)
 // 1 when VD itself would show hand passthrough in SteamVR (cached ~1 s; must
 // be called on a Mono-attached thread). `chains` receives VD's VR stream
