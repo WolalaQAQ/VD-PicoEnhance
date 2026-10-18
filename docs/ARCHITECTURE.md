@@ -175,12 +175,13 @@ Mono does not ship (`TypeLoadException: System.Version`) and the backend silentl
 falls back to `dataonly`. Use the `netstandard2.0`/`net472` build instead (the
 packer now prefers those).
 
-> **PICO 4 (A8110) note.** The stock PICO runtime exports no active-input-device
-> query (every spelling returns `XR_ERROR_FUNCTION_UNSUPPORTED`), so the layer
-> falls back to the `pvr.active.input_device` system property (`2` = hands) and
-> masks the grip pose's `isActive`. That native path alone makes VD render hands,
-> so `auto`/`dataonly` is sufficient — the Harmony `IsControllerActive` patch is
-> **not** required on this device.
+> **PICO 4 (A8110) note.** The layer asks the runtime for the active input device
+> first and falls back to the `pvr.active.input_device` system property (`2` =
+> hands) when the query is not exported — which is the case for the loader
+> Virtual Desktop 1.34.18.0 ships, while 1.34.22.0 resolves it (`r=0`). Either
+> way the grip pose's `isActive` is masked, and that native path alone makes VD
+> render hands, so `auto`/`dataonly` is sufficient — the Harmony
+> `IsControllerActive` patch is **not** required on this device.
 
 ## 5. Configuration and rollback
 

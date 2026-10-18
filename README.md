@@ -28,7 +28,7 @@ See the [changelog](CHANGELOG.md) for changes in each version.
 | Joint freeze gate | Reports a hand as inactive when its joints have not updated for a while, easing the "hand flashes and disappears" behaviour | `hj_freeze_ms` (default 300 ms) |
 | System hand-gesture suppression | The system shell only skips the recenter/dock gestures for packages on its own hardcoded list, which contains PICO's streaming app; the module makes it treat `VirtualDesktop.Android` the same way, so gestures stop acting while VD is focused and work again as soon as it is not | always on (while VD runs) |
 
-> This fork targets the plain **PICO 4 (A8110)**, which has no eye-tracking or face-tracking hardware, so the upstream eye-gaze pointer fix has been removed from the native layer and the managed mod. Active input is detected through the `pvr.active.input_device` system property.
+> This fork targets the plain **PICO 4 (A8110)**, which has no eye-tracking or face-tracking hardware, so the upstream eye-gaze pointer fix has been removed from the native layer and the managed mod. Active input comes from PICO's own query when the build exports it (Virtual Desktop 1.34.22.0 does) and from the `pvr.active.input_device` system property otherwise.
 
 In SteamVR the hole follows the same conditions as Virtual Desktop's own `PassthroughPortals` logic (VR stream source, `VRPassthroughHands` enabled, hands as current input, and so on). Outside SteamVR the module does not touch any layer.
 
@@ -38,7 +38,7 @@ In SteamVR the hole follows the same conditions as Virtual Desktop's own `Passth
 |---|---|
 | Headset | **PICO 4 / PICO 4 Pro**, arm64-v8a |
 | Root | Magisk with **Zygisk enabled** (Zygisk API v5, i.e. Magisk ≥ 27000) |
-| Virtual Desktop | Android `VirtualDesktop.Android` **1.34.22.0** (tested on **1.34.18.0**), unmodified |
+| Virtual Desktop | Android `VirtualDesktop.Android` **1.34.22.0** (also verified on **1.34.18.0**), unmodified |
 | PC (build only) | Windows + PowerShell, Android **NDK 26.1.10909125**, **CMake 3.22.1**, .NET SDK |
 
 Other Virtual Desktop versions are untested. The compatibility layer works through symbols in the app's memory and the PICO runtime's resolution interface, but internal method names are version-specific.

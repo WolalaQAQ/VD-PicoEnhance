@@ -28,7 +28,7 @@ VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时向 Virtual Desktop 
 | 冻结门控 | runtime 关节数据长时间不更新时，把这只手报告为不活跃，缓解手势"亮一下就消失" | `hj_freeze_ms`（默认 300 ms） |
 | 屏蔽系统手势 | 系统 shell 只会对一份硬编码名单里的包跳过"重定位/dock"手势（名单里只有 PICO 串流应用）；模块让它对 `VirtualDesktop.Android` 同样处理，于是 VD 聚焦时手势不再生效，切走后立即恢复 | 始终开启（仅 VD 运行时） |
 
-> 本 fork 面向**普通 PICO 4（A8110）**，该机无眼动/面部追踪硬件，因此已从原生层与托管 mod 中移除上游的眼动手势指针修正。当前输入通过系统属性 `pvr.active.input_device` 判定。
+> 本 fork 面向**普通 PICO 4（A8110）**，该机无眼动/面部追踪硬件，因此已从原生层与托管 mod 中移除上游的眼动手势指针修正。当前输入优先用 PICO 自身的查询接口（Virtual Desktop 1.34.22.0 已导出该接口），该接口不可用时才回退到系统属性 `pvr.active.input_device`。
 
 SteamVR 里开孔的条件与 Virtual Desktop 自身的 `PassthroughPortals` 逻辑一致：串流源为 VR、`VRPassthroughHands` 打开、当前输入是手等。不在 SteamVR 时，模块不改动任何层。
 
@@ -38,7 +38,7 @@ SteamVR 里开孔的条件与 Virtual Desktop 自身的 `PassthroughPortals` 逻
 |---|---|
 | 头显 | **PICO 4 / PICO 4 Pro**，arm64-v8a |
 | Root | Magisk，且**已开启 Zygisk**（Zygisk API v5，即 Magisk ≥ 27000） |
-| Virtual Desktop | Android 版 `VirtualDesktop.Android` **1.34.22.0**（已在 **1.34.18.0** 验证），未修改 |
+| Virtual Desktop | Android 版 `VirtualDesktop.Android` **1.34.22.0**（亦已在 **1.34.18.0** 验证），未修改 |
 | PC（仅构建用） | Windows + PowerShell、Android **NDK 26.1.10909125**、**CMake 3.22.1**、.NET SDK |
 
 其他 Virtual Desktop 版本尚未验证。兼容层通过应用内存中的符号与 PICO runtime 的解析接口工作，但内部方法名与版本相关。

@@ -8,6 +8,7 @@
 - **runtime 侧配套载荷**：`libvdhs_rt.so` 注入 PICO 的独立进程 OpenXR runtime（`com.pico.xr.openxr_runtime`），在 VD 占用 MR 服务（`sys.pxr.mrserivce.user`）期间清掉 runtime 转发给各会话（包括 shell）的手势状态。它 hook `InputDeviceManager::service_status_callback`，并在其库加载后 hook runtime 自身的的手势事件发射函数（靠它打印的日志字符串定位），在事件投递前拦下。
 - **共用符号解析器**：内存内 ELF 解析器移到 `vdhs_sym.c` / `vdhs_sym.h`，并新增 APK 内嵌库的回退：PICO runtime 的库直接从 `XRRuntime.apk` 映射，`/proc/self/maps` 里没有任何路径能对应到 `.so`。候选基址取自这些映射起始处的 ELF 头，且每次读取都用镜像自身的段做边界校验，因此陈旧或被截断的映射不会再让目标进程崩溃。
 - 已在头显验证：VD 里手势不再生效、退出后立刻恢复、手追与手部透视不受影响。
+- **已在同一台头显上验证 Virtual Desktop 1.34.22.0**：本仓库期望的 loader 偏移与托管名称本就是 1.34.22 的，因此该版本上所有 hook 都无偏移不符地安装成功（714096 B loader、`xrEnumerateInstanceExtensionProperties @ +0x385f4` 等），扩展注入仍为 16→19、`supportsHandTracking=1`、两只手都建了 hand tracker、aim 对双手都能分类。该版本上 PICO 自身的 active-input 查询可用（`xrGetActiveInputDeviceTypePico`，`r=0`），所以 `pvr.active.input_device` 属性只是不导出该接口的版本（1.34.18.0）的回退。
 
 ## 1.0.8 — 2026-10-18 — PICO 4 (A8110) 移植
 
