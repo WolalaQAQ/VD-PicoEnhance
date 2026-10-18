@@ -49,6 +49,9 @@ namespace VdHsMod
 
                 // 3) Optional: add the gesture-suppression row to VD's Input tab.
                 GestureToggle.Start();
+
+                // 4) Optional: translate the control panel (payload/ui_zh.txt).
+                UiLocalize.Start();
             }
             catch (Exception ex)
             {

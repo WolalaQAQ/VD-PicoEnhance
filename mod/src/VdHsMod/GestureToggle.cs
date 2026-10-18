@@ -191,7 +191,7 @@ namespace VdHsMod
         /// Walks the UI tree looking for a TextBlock that already displays
         /// Chinese, and returns the SpriteFont it uses.
         /// </summary>
-        private static object FindCjkFont(object root)
+        internal static object FindCjkFont(object root)
         {
             var queue = new System.Collections.Generic.Queue<object>();
             if (root != null) queue.Enqueue(root);
@@ -217,7 +217,7 @@ namespace VdHsMod
             return null;
         }
 
-        private static void EnqueueChildren(System.Collections.Generic.Queue<object> queue, object node, string member)
+        internal static void EnqueueChildren(System.Collections.Generic.Queue<object> queue, object node, string member)
         {
             var children = Get(node, member);
             if (children == null) return;
@@ -231,7 +231,7 @@ namespace VdHsMod
             }
         }
 
-        private static bool HasCjk(string s)
+        internal static bool HasCjk(string s)
         {
             foreach (var c in s)
                 if (c >= 0x3400 && c <= 0x9FFF) return true;
@@ -303,7 +303,7 @@ namespace VdHsMod
             catch { return -1; }
         }
 
-        private static object FindGame()
+        internal static object FindGame()
         {
             var t = FindType("VirtualDesktop.Mobile.InputManager");
             if (t == null) return null;
@@ -328,7 +328,7 @@ namespace VdHsMod
             return null;
         }
 
-        private static object Get(object target, string member)
+        internal static object Get(object target, string member)
         {
             if (target == null) return null;
             var t = target.GetType();
@@ -355,7 +355,7 @@ namespace VdHsMod
             f?.SetValue(target, value);
         }
 
-        private static void TrySet(object target, string member, object value)
+        internal static void TrySet(object target, string member, object value)
         {
             try { Set(target, member, value); } catch { }
         }

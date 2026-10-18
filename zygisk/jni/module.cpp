@@ -46,6 +46,7 @@ struct StagedFile {
 static StagedFile g_files[] = {
     {"payload/libvdhs.so", true, -1, false},
     {"payload/VdHsMod.dll", true, -1, false},
+    {"payload/ui_zh.txt", false, -1, false},
     {"payload/Xenko.OpenXR.patched.dll", false, -1, false},
     {"payload/0Harmony.dll", false, -1, false},
     {"payload/backend.txt", false, -1, false},
