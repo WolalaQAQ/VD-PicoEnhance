@@ -3,9 +3,9 @@
 [English](README.md) | 简体中文
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
-![Platform: PICO 4 Pro](https://img.shields.io/badge/platform-PICO%204%20Pro-lightgrey)
+![Platform: PICO 4](https://img.shields.io/badge/platform-PICO%204-lightgrey)
 
-让 **PICO 4 Pro** 上**未经修改的官方** Virtual Desktop（`VirtualDesktop.Android`）用上 **PICO 光学手追**、**Quest 式手部透视**和**眼动手势指针修正**。
+让 **PICO 4 / PICO 4 Pro** 上**未经修改的官方** Virtual Desktop（`VirtualDesktop.Android`）用上 **PICO 光学手追**与**Quest 式手部透视**。
 
 VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时向 Virtual Desktop 进程注入一层很小的 OpenXR 兼容层。它不修改、不重签、不改名、也不重打包 Virtual Desktop 的 APK，只是让应用用上厂商自带 loader 从不去申请的 PICO 功能。
 
@@ -26,7 +26,9 @@ VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时向 Virtual Desktop 
 | 手部透视（Virtual Desktop 内） | 每只手一个独立的 projected 层；未绘制时恢复背景透视 | `pt_split`、`pt_bg_fix` |
 | 手部透视（SteamVR） | 在 Virtual Desktop 串流画面的 swapchain 上原地改 alpha，只在手的位置开孔；不拷贝、不加层 | `pt_hole`、`pt_follow_settings` |
 | 冻结门控 | runtime 关节数据长时间不更新时，把这只手报告为不活跃，缓解手势"亮一下就消失" | `hj_freeze_ms`（默认 300 ms） |
-| Eye gaze | 仅对界面指针做 One-Euro 平滑、跳变确认和头部姿态补偿；串流眼动透传，两项增强默认开启 | `gaze_filter`、`gaze_vd_fix` |
+| 屏蔽系统手势 | 系统 shell 只会对一份硬编码名单里的包跳过"重定位/dock"手势（名单里只有 PICO 串流应用）；模块让它对 `VirtualDesktop.Android` 同样处理，于是 VD 聚焦时手势不再生效，切走后立即恢复 | 始终开启（仅 VD 运行时） |
+
+> 本 fork 面向**普通 PICO 4（A8110）**，该机无眼动/面部追踪硬件，因此已从原生层与托管 mod 中移除上游的眼动手势指针修正。当前输入通过系统属性 `pvr.active.input_device` 判定。
 
 SteamVR 里开孔的条件与 Virtual Desktop 自身的 `PassthroughPortals` 逻辑一致：串流源为 VR、`VRPassthroughHands` 打开、当前输入是手等。不在 SteamVR 时，模块不改动任何层。
 
@@ -34,9 +36,9 @@ SteamVR 里开孔的条件与 Virtual Desktop 自身的 `PassthroughPortals` 逻
 
 | 组件 | 要求 |
 |---|---|
-| 头显 | **PICO 4 Pro**，arm64-v8a |
+| 头显 | **PICO 4 / PICO 4 Pro**，arm64-v8a |
 | Root | Magisk，且**已开启 Zygisk**（Zygisk API v5，即 Magisk ≥ 27000） |
-| Virtual Desktop | Android 版 `VirtualDesktop.Android` **1.34.22.0**，未修改 |
+| Virtual Desktop | Android 版 `VirtualDesktop.Android` **1.34.22.0**（已在 **1.34.18.0** 验证），未修改 |
 | PC（仅构建用） | Windows + PowerShell、Android **NDK 26.1.10909125**、**CMake 3.22.1**、.NET SDK |
 
 其他 Virtual Desktop 版本尚未验证。兼容层通过应用内存中的符号与 PICO runtime 的解析接口工作，但内部方法名与版本相关。
@@ -45,13 +47,15 @@ SteamVR 里开孔的条件与 Virtual Desktop 自身的 `PassthroughPortals` 逻
 
 Zygisk 模块匹配 Virtual Desktop 进程，把原生载荷 `libvdhs.so` 与托管 mod `VdHsMod.dll` stage 到应用私有目录，并在 **Virtual Desktop 自带的 OpenXR loader** 的导出函数上安装 inline hook。兼容层通过这些 hook 访问 PICO runtime：申请 PICO 手追扩展、合成 FB aim/mesh 数据、写入手部透视开孔。系统库与已安装文件都不改动。
 
+此外，模块还在 Virtual Desktop 之外注入两个小载荷：一个注入 PICO 的独立进程 OpenXR runtime（`com.pico.xr.openxr_runtime`），在 VD 占用 MR 服务期间把 runtime 转发给 shell 的手势状态清零；另一个注入系统 shell（`com.picoxr.xrshell`）——真正执行手势的就是它。shell 内部有一份硬编码名单，对名单里的包不做手势（名单中只有 PICO 自家的串流应用 `com.picovr.picostreamassistant`），载荷让这份逐帧检查对 `VirtualDesktop.Android` 也返回同样结果。这与 PICO 串流应用用的是同一机制，并且以焦点为界：VD 一旦不再处于前台，手势立即恢复。
+
 完整的组件划分、hook 列表、托管后端与健壮性约定见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
 ## 目录结构
 
 | 路径 | 内容 |
 |---|---|
-| `mod/native/` | 原生载荷 `libvdhs.so`：`vdhs_payload.c`（Mono 嵌入加载器）、`vdhs_layer.c`（OpenXR hook、gaze）、`vdhs_hand.c`（手追、aim/mesh）、`vdhs_pt.c`（SteamVR 透视开孔）、`vdhs_mark.c`；内置 `third_party/shadowhook-2.0.1/` |
+| `mod/native/` | 原生载荷 `libvdhs.so`：`vdhs_payload.c`（Mono 嵌入加载器）、`vdhs_layer.c`（OpenXR hook）、`vdhs_hand.c`（手追、aim/mesh）、`vdhs_pt.c`（SteamVR 透视开孔）、`vdhs_mark.c`、共用 `vdhs_sym.c`；配套载荷 `vdhs_rt.c`（runtime 进程）、`vdhs_shell.c`（shell 进程）；内置 `third_party/shadowhook-2.0.1/` |
 | `mod/src/VdHsMod/` | 托管 mod（netstandard2.0，全程反射，不引用 Virtual Desktop 程序集） |
 | `zygisk/` | Magisk/Zygisk 模块：注入器 `jni/`、`payload/`（`mode.txt`、`backend.txt`）、`build.ps1` |
 | `tools/mesh/` | 把头显自己的 PICO 手部 mesh 转成 `hand_mesh_fb.bin` |
@@ -102,7 +106,7 @@ powershell -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
 
 默认使用无需配置文件。需要调整功能时，可将 [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) 中的相应条目写入设备上的 `/data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt`。每个键都是可选的，缺省时沿用内置默认值；示例列出了可配置的键与建议值。
 
-SteamVR 手部透视开孔默认开启（`pt_hole=1`），并跟随 VD 的“VR 手部透视”开关。界面眼动平滑和头部补偿默认开启；已有配置中的显式设置优先于默认值。保存配置后重启 VD 生效。
+SteamVR 手部透视开孔默认开启（`pt_hole=1`），并跟随 VD 的“VR 手部透视”开关。已有配置中的显式设置优先于默认值。保存配置后重启 VD 生效。
 
 ### 手部网格
 
@@ -152,7 +156,6 @@ python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
 ## 已知问题
 
 - **SteamVR 里用捏合（扳机）切换主手不生效。** 手张开时扳机值约为 0.27、从不为 0，而 Virtual Desktop 只在扳机值等于 1.0 时才发出数字 click。候选修法是在托管层给扳机加死区并重映射，尚未测试。
-- **Eye gaze** 转头时指针仍会轻微移动。
 - runtime（或 SteamVR）偶尔会让手部关节长时间冻结，手势"亮一下就消失"，重启 SteamVR 可以恢复。
 - 头显内会显示 PICO 的"不支持手势"提示框，暂不处理。
 - Virtual Desktop 更新可能改动内部命名，导致兼容层失效，需要等适配。

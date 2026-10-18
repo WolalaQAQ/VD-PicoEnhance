@@ -3,9 +3,9 @@
 English | [简体中文](README_zh.md)
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
-![Platform: PICO 4 Pro](https://img.shields.io/badge/platform-PICO%204%20Pro-lightgrey)
+![Platform: PICO 4](https://img.shields.io/badge/platform-PICO%204-lightgrey)
 
-Brings **PICO optical hand tracking**, **Quest-style hand passthrough** and an **eye-gaze pointer fix** to the **unmodified official** Virtual Desktop (`VirtualDesktop.Android`) on the **PICO 4 Pro**.
+Brings **PICO optical hand tracking** and **Quest-style hand passthrough** to the **unmodified official** Virtual Desktop (`VirtualDesktop.Android`) on the **PICO 4 / PICO 4 Pro**.
 
 VD-PicoEnhance is a Magisk/Zygisk module that injects a small OpenXR compatibility layer into the Virtual Desktop process at runtime. It does not modify, repack, re-sign or rename the Virtual Desktop APK; it only lets the app use PICO features that its bundled loader never asks for.
 
@@ -26,7 +26,9 @@ See the [changelog](CHANGELOG.md) for changes in each version.
 | Hand passthrough (in Virtual Desktop) | One projected layer per hand; the background passthrough state is restored when no hole is drawn | `pt_split`, `pt_bg_fix` |
 | Hand passthrough (in SteamVR) | Sets the alpha in place on Virtual Desktop's streamed swapchain, opening a hole only where a hand is; no copy, no extra layer | `pt_hole`, `pt_follow_settings` |
 | Joint freeze gate | Reports a hand as inactive when its joints have not updated for a while, easing the "hand flashes and disappears" behaviour | `hj_freeze_ms` (default 300 ms) |
-| Eye gaze | Pointer-only One-Euro smoothing, jump confirmation and head-pose compensation, enabled by default; streaming gaze passes through | `gaze_filter`, `gaze_vd_fix` |
+| System hand-gesture suppression | The system shell only skips the recenter/dock gestures for packages on its own hardcoded list, which contains PICO's streaming app; the module makes it treat `VirtualDesktop.Android` the same way, so gestures stop acting while VD is focused and work again as soon as it is not | always on (while VD runs) |
+
+> This fork targets the plain **PICO 4 (A8110)**, which has no eye-tracking or face-tracking hardware, so the upstream eye-gaze pointer fix has been removed from the native layer and the managed mod. Active input is detected through the `pvr.active.input_device` system property.
 
 In SteamVR the hole follows the same conditions as Virtual Desktop's own `PassthroughPortals` logic (VR stream source, `VRPassthroughHands` enabled, hands as current input, and so on). Outside SteamVR the module does not touch any layer.
 
@@ -34,9 +36,9 @@ In SteamVR the hole follows the same conditions as Virtual Desktop's own `Passth
 
 | Item | Requirement |
 |---|---|
-| Headset | **PICO 4 Pro**, arm64-v8a |
+| Headset | **PICO 4 / PICO 4 Pro**, arm64-v8a |
 | Root | Magisk with **Zygisk enabled** (Zygisk API v5, i.e. Magisk ≥ 27000) |
-| Virtual Desktop | Android `VirtualDesktop.Android` **1.34.22.0**, unmodified |
+| Virtual Desktop | Android `VirtualDesktop.Android` **1.34.22.0** (tested on **1.34.18.0**), unmodified |
 | PC (build only) | Windows + PowerShell, Android **NDK 26.1.10909125**, **CMake 3.22.1**, .NET SDK |
 
 Other Virtual Desktop versions are untested. The compatibility layer works through symbols in the app's memory and the PICO runtime's resolution interface, but internal method names are version-specific.
@@ -45,13 +47,15 @@ Other Virtual Desktop versions are untested. The compatibility layer works throu
 
 The Zygisk module matches the Virtual Desktop process, stages the native payload `libvdhs.so` and the managed mod `VdHsMod.dll` into the app's private directory, and installs inline hooks on the exports of **Virtual Desktop's own OpenXR loader**. Through those hooks the layer reaches the PICO runtime: it requests the PICO hand-tracking extensions, synthesises FB aim/mesh data and writes the hand-passthrough hole. No system library or installed file is changed.
 
+The module also injects two small companion payloads outside Virtual Desktop: one into PICO's out-of-process OpenXR runtime (`com.pico.xr.openxr_runtime`), which zeroes the hand-gesture state the runtime relays to the shell while VD owns the MR service, and one into the system shell (`com.picoxr.xrshell`), which is the component that actually performs the gestures. The shell keeps a hardcoded list of packages it refuses to act for — it contains exactly one entry, PICO's own streaming app (`com.picovr.picostreamassistant`) — so the payload answers that per-frame check for `VirtualDesktop.Android` as well. That is the same mechanism PICO's streaming app relies on, and it is scoped by focus: gestures come back the moment VD is no longer the focused app.
+
 For the full component breakdown, the hook list, the managed backends and the robustness contract, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
-| `mod/native/` | Native payload `libvdhs.so`: `vdhs_payload.c` (Mono embedding loader), `vdhs_layer.c` (OpenXR hooks, gaze), `vdhs_hand.c` (hand tracking, aim/mesh), `vdhs_pt.c` (SteamVR passthrough hole), `vdhs_mark.c`; vendored `third_party/shadowhook-2.0.1/` |
+| `mod/native/` | Native payload `libvdhs.so`: `vdhs_payload.c` (Mono embedding loader), `vdhs_layer.c` (OpenXR hooks), `vdhs_hand.c` (hand tracking, aim/mesh), `vdhs_pt.c` (SteamVR passthrough hole), `vdhs_mark.c`, shared `vdhs_sym.c`; the companion payloads `vdhs_rt.c` (runtime process) and `vdhs_shell.c` (shell process); vendored `third_party/shadowhook-2.0.1/` |
 | `mod/src/VdHsMod/` | Managed mod (netstandard2.0, reflection only, no reference to Virtual Desktop assemblies) |
 | `zygisk/` | Magisk/Zygisk module: injector `jni/`, `payload/` (`mode.txt`, `backend.txt`), `build.ps1` |
 | `tools/mesh/` | Converts the headset's own PICO hand mesh into `hand_mesh_fb.bin` |
@@ -102,7 +106,7 @@ To upgrade, run the installer from the new bundle to install the full module, th
 
 No configuration file is needed for the defaults. To adjust a feature, copy the relevant entries from [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) into `/data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt` on the headset. Every key is optional; a missing key keeps its built-in default. The example lists configurable keys and suggested values.
 
-SteamVR hand-passthrough holes are enabled by default (`pt_hole=1`) and follow VD's VR hand-passthrough setting. UI gaze smoothing and head-pose compensation are enabled by default; explicit values in an existing configuration override the defaults. Restart VD after saving changes.
+SteamVR hand-passthrough holes are enabled by default (`pt_hole=1`) and follow VD's VR hand-passthrough setting. Explicit values in an existing configuration override the defaults. Restart VD after saving changes.
 
 ### Hand mesh
 
@@ -152,7 +156,6 @@ Provenance and disclaimer: [`assets/mesh/README.md`](assets/mesh/README.md).
 ## Known issues
 
 - **Pinch (trigger) as a main-hand switch does not work in SteamVR.** With the hand open the trigger reads about 0.27 and never reaches 0, while Virtual Desktop only emits a digital click at exactly 1.0. A candidate fix is to add a dead zone and remap the trigger in the managed layer; untested.
-- **Eye gaze** still drifts slightly when you turn your head.
 - The runtime (or SteamVR) sometimes freezes the hand joints for a long time; the gesture then "flashes" and disappears. Restarting SteamVR recovers it.
 - The headset shows PICO's "gestures not supported" prompt; not handled for now.
 - A Virtual Desktop update can change internal names and break the layer until it is adapted.

@@ -2,6 +2,20 @@
 
 [English](CHANGELOG.md) | 简体中文
 
+## 1.0.9 — 2026-10-18 — 屏蔽系统手势
+
+- **VD 运行时不再触发系统手势**。重定位/打开 dock 这些系统手势是由系统 shell 执行的，不在应用内，所以 VD 里的层拦不住。逆向 shell（`com.picoxr.xrshell`）后找到了 PICO 自家串流应用的做法：shell 内部有一份硬编码的包名名单——`gDisableSystemGesturesPackageNames`，在静态初始化里构建，且只有一项 `com.picovr.picostreamassistant`——`InputManager::updateAppDisableSystemGestures(pkg, displayState, isSelf)` 每帧重新比对它并据此设置 `gApplicationDisableSystemGestures`。新增第三个 Zygisk 目标（`com.picoxr.xrshell`，载荷 `libvdhs_shell.so`）hook 该函数，对 `VirtualDesktop.Android` 给出同样的结果：VD 处于前台时 shell 不再执行手势，VD 一失焦即恢复。
+- **runtime 侧配套载荷**：`libvdhs_rt.so` 注入 PICO 的独立进程 OpenXR runtime（`com.pico.xr.openxr_runtime`），在 VD 占用 MR 服务（`sys.pxr.mrserivce.user`）期间清掉 runtime 转发给各会话（包括 shell）的手势状态。它 hook `InputDeviceManager::service_status_callback`，并在其库加载后 hook runtime 自身的的手势事件发射函数（靠它打印的日志字符串定位），在事件投递前拦下。
+- **共用符号解析器**：内存内 ELF 解析器移到 `vdhs_sym.c` / `vdhs_sym.h`，并新增 APK 内嵌库的回退：PICO runtime 的库直接从 `XRRuntime.apk` 映射，`/proc/self/maps` 里没有任何路径能对应到 `.so`。候选基址取自这些映射起始处的 ELF 头，且每次读取都用镜像自身的段做边界校验，因此陈旧或被截断的映射不会再让目标进程崩溃。
+- 已在头显验证：VD 里手势不再生效、退出后立刻恢复、手追与手部透视不受影响。
+
+## 1.0.8 — 2026-10-18 — PICO 4 (A8110) 移植
+
+- **PICO 4 支持**：本机无眼动/面部追踪硬件，从原生层与托管 mod 中移除相关代码。`vdhs_layer.c` 删除注视块（`hk_create_action_space`/`hk_locate_space`、Mono 栈回溯、One-Euro 滤波）、gaze hook 表项、`hk_create_action` 的 `eye_gaze_pose` 分支与注视权限修复；`vdhs_hand.c` 删除注视配置字段与 `eye_gaze` 还原路径。`module.prop` / `customize.sh` 标注 “PICO 4 slim: no eye/face tracking”。
+- **输入判定回退**：PICO 4 运行时未导出任何 active-input-device 查询（各拼写均返回 `XR_ERROR_FUNCTION_UNSUPPORTED`）。层改为在 `vdhs_hand_active_input()` 读取系统属性 `pvr.active.input_device`（`2` = 双手），并据此把 grip 姿态的 `isActive` 置 0——这正是让 VD 切换到双手的关键。已在 VD 1.34.18.0 验证（`exts 16->19`、`supportsHandTracking=1`、`hand_ext=1`、`locate ... isActive=1`、VD 为两只手拉取手部网格）。SteamVR 双手显示与手势透视均正常。
+- **打包**：打包含 Mono 兼容的 `0Harmony.dll`（`netstandard2.0` / `net472`）而不再用 `net35`——后者在头显的 Mono 上加载失败（`mscorlib, Version=2.0.0.0`）。ZIP 改用 .NET `ZipArchive` 并以正斜杠分隔（PowerShell 5.1 的 `Compress-Archive` 会写反斜杠）。
+- 托管 `IsControllerActive` 切换（Harmony/redirect）在 PICO 4 上**非必需**；`auto` → `dataonly` 即可。
+
 ## 1.0.7 — 2026-10-10
 
 - 为眼动消费者栈遍历补齐 Mono GC 线程状态的进入／退出配对，修正进入 SteamVR 时并发首次查询可能触发的 `STATE_BLOCKING / DO_BLOCKING` 崩溃路径。缺少线程状态 API 时跳过指针增强；串流眼动继续保留上游结果。

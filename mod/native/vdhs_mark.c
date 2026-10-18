@@ -49,6 +49,65 @@ typedef struct {
 
 typedef XrResult (*PFN_xrNegotiateLoaderRuntimeInterface)(const XrNegotiateLoaderInfo*, XrNegotiateRuntimeRequest*);
 
+extern void* vdhs_resolve_mapped_symbol(const char* lib, const char* name) __attribute__((weak));
+
+// XrLoaderInitInfoAndroidKHR (XR_KHR_android_create_instance)
+#define XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR 1000008001u
+typedef struct {
+    uint32_t type; uint32_t pad;
+    const void* next;
+    void* applicationVM;
+    void* applicationContext;
+} XrLoaderInitInfoAndroidKHR;
+
+// VD's loader never calls the runtime's xrInitializeLoaderKHR, so the forward
+// loader's exported `vm` (and its runtime interface) stay unset and the PICO
+// extension mark cannot run. Recreate the call the way a PICO OpenXR app would.
+static int bootstrap_forward_loader(void* const* vm_p) {
+    static int attempted;
+    if (attempted) return -1;
+    attempted = 1;
+    if (!vm_p || *vm_p) return 0;
+
+    typedef jint (*PFN_GetCreatedJavaVMs)(JavaVM**, jsize, jsize*);
+    // The Zygisk namespace cannot dlopen/dlsym libart, so scan the process'
+    // mapped ELFs (dl_iterate_phdr ignores namespaces) for the export.
+    PFN_GetCreatedJavaVMs getvms = (PFN_GetCreatedJavaVMs)dlsym(RTLD_DEFAULT, "JNI_GetCreatedJavaVMs");
+    if (!getvms && vdhs_resolve_mapped_symbol)
+        getvms = (PFN_GetCreatedJavaVMs)vdhs_resolve_mapped_symbol("libart.so", "JNI_GetCreatedJavaVMs");
+    if (!getvms && vdhs_resolve_mapped_symbol)
+        getvms = (PFN_GetCreatedJavaVMs)vdhs_resolve_mapped_symbol("libnativehelper.so", "JNI_GetCreatedJavaVMs");
+    if (!getvms) { LOGI("mark: bootstrap no JNI_GetCreatedJavaVMs"); return -1; }
+    JavaVM* jvm = 0; jsize n = 0;
+    if (getvms(&jvm, 1, &n) != 0 || n <= 0 || !jvm) { LOGI("mark: bootstrap no JavaVM"); return -1; }
+
+    JNIEnv* env = 0;
+    if ((*jvm)->GetEnv(jvm, &env, JNI_VERSION_1_6) != JNI_OK) {
+        if ((*jvm)->AttachCurrentThread(jvm, &env, 0) != JNI_OK || !env) {
+            LOGI("mark: bootstrap no JNIEnv"); return -2;
+        }
+    }
+    jobject ctx = 0;
+    jclass at = (*env)->FindClass(env, "android/app/ActivityThread");
+    if (at) {
+        jmethodID m = (*env)->GetStaticMethodID(env, at, "currentApplication", "()Landroid/app/Application;");
+        if (m) {
+            jobject local = (*env)->CallStaticObjectMethod(env, at, m);
+            if (local) ctx = (*env)->NewGlobalRef(env, local);
+        }
+    }
+    LOGI("mark: bootstrap jvm=%p ctx=%p", jvm, ctx);
+
+    PFN_xrInitializeLoaderKHR init = (PFN_xrInitializeLoaderKHR)
+        vdhs_resolve_mapped_symbol("libopenxr_forwardloader.so", "xrInitializeLoaderKHR");
+    if (!init) { LOGI("mark: bootstrap no xrInitializeLoaderKHR"); return -3; }
+
+    XrLoaderInitInfoAndroidKHR info = { XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR, 0, 0, (void*)jvm, (void*)ctx };
+    XrResult r = init(&info);
+    LOGI("mark: bootstrap xrInitializeLoaderKHR=%d vm_now=%p", r, vm_p ? *vm_p : 0);
+    return r == 0 ? 0 : -4;
+}
+
 typedef struct { uint32_t type; const void* next; char extensionName[128]; uint32_t extensionVersion; } XrExtensionProperties;
 typedef XrResult (*PFN_xrEnumerateInstanceExtensionProperties)(const char*, uint32_t, uint32_t*, XrExtensionProperties*);
 
@@ -77,14 +136,18 @@ static int ensure_runtime(void) {
         // in its classloader namespace, via its in-memory .dynsym.
         neg = (PFN_xrNegotiateLoaderRuntimeInterface)
             vdhs_resolve_mapped_symbol("libopenxr_forwardloader.so", "xrNegotiateLoaderRuntimeInterface");
-        if (!neg) return -1;   // not mapped yet; caller may retry
+        if (!neg) { LOGI("mark: fwd-loader negotiate symbol not mapped"); return -1; }
         // Negotiate dereferences the forward loader's exported global `vm`
         // (JavaVM*, set once VD calls its JNI_OnLoad / xrInitializeLoaderKHR)
         // without a NULL check: calling it earlier SIGSEGVs at +0x44 (observed,
         // disassembly of /system/lib64/libopenxr_forwardloader.so). Gate on it.
         void* const* vm = (void* const*)
             vdhs_resolve_mapped_symbol("libopenxr_forwardloader.so", "vm");
-        if (!vm || !*vm) return -1;    // loader not initialised yet; retry
+        if (!vm) { LOGI("mark: fwd-loader 'vm' symbol not found"); return -1; }
+        if (!*vm) {
+            int brc = bootstrap_forward_loader(vm);
+            if (!*vm) { LOGI("mark: fwd-loader vm still NULL (bootstrap rc=%d)", brc); return -1; }
+        }
     } else {
         void* h = dlopen("libopenxr_forwardloader.so", RTLD_NOW);
         if (!h) { LOGI("mark: dlopen failed: %s", dlerror()); return -1; }
@@ -102,8 +165,8 @@ static int ensure_runtime(void) {
     }
     // -6 (XR_ERROR_INITIALIZATION_FAILED) is returned until VD has run
     // xrInitializeLoaderKHR on the forward loader (observed): retryable.
-    if (r == -6 && vdhs_resolve_mapped_symbol) return -1;
-    if (r != 0 || !rr.getInstanceProcAddr) return -3;
+    if (r == -6 && vdhs_resolve_mapped_symbol) { LOGI("mark: negotiate -6 (loader init not run yet)"); return -1; }
+    if (r != 0 || !rr.getInstanceProcAddr) { LOGI("mark: negotiate failed r=%d gipa=%p", r, rr.getInstanceProcAddr); return -3; }
     g_gipa = rr.getInstanceProcAddr;
     return 0;
 }
@@ -209,9 +272,13 @@ int vdhs_active_input(uint64_t instance) {
     typedef XrResult (*PFN_xrGetActiveInputDeviceTypePico)(XrInstance, uint32_t*);
     PFN_xrGetActiveInputDeviceTypePico fn = 0;
     XrResult r = g_gipa(instance, "xrGetActiveInputDeviceTypePico", (PFN_xrVoidFunction*)&fn);
-    if (r != 0 || !fn) return -11;
-    uint32_t v = 0xffffffffu;
-    r = fn(instance, &v);
-    if (r != 0) return -12;
-    return (int)v;
+    if (r == 0 && fn) {
+        uint32_t v = 0xffffffffu;
+        if (fn(instance, &v) == 0) return (int)v;
+        return -12;
+    }
+    // This PICO runtime has no OpenXR active-input proc; use the same system
+    // property fallback the compat layer uses.
+    extern int vdhs_hand_active_input(void);
+    return vdhs_hand_active_input();
 }

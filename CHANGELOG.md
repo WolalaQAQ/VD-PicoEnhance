@@ -2,6 +2,20 @@
 
 English | [简体中文](CHANGELOG_zh.md)
 
+## 1.0.9 — 2026-10-18 — system hand-gesture suppression
+
+- **System hand gestures are suppressed while Virtual Desktop runs.** The recenter / open-dock gestures are performed by the system shell, not by the app, so no layer inside Virtual Desktop can stop them. Reverse engineering the shell (`com.picoxr.xrshell`) showed how PICO's own streaming app avoids them: the shell keeps a hardcoded list of packages it refuses to act for — `gDisableSystemGesturesPackageNames`, built in a static initialiser and containing exactly one entry, `com.picovr.picostreamassistant` — and `InputManager::updateAppDisableSystemGestures(pkg, displayState, isSelf)` re-evaluates it every frame to drive `gApplicationDisableSystemGestures`. A third Zygisk target (`com.picoxr.xrshell`, payload `libvdhs_shell.so`) hooks that function and answers the per-frame check for `VirtualDesktop.Android` the same way, so the shell stops acting on gestures while VD is focused and behaves normally again as soon as it is not.
+- **Runtime-side companion payload.** `libvdhs_rt.so` is injected into PICO's out-of-process OpenXR runtime (`com.pico.xr.openxr_runtime`) and clears the hand-gesture state the runtime relays to every session (the shell included) while VD owns the MR service (`sys.pxr.mrserivce.user`). It hooks `InputDeviceManager::service_status_callback`, and — once that library is mapped — the runtime's own gesture emitter, located through the log string it prints, dropping the event before it is delivered.
+- **Shared symbol resolver.** The in-memory ELF resolver moved to `vdhs_sym.c` / `vdhs_sym.h` and gained a fallback for APK-embedded libraries: PICO's runtime libraries are mapped straight out of `XRRuntime.apk`, so nothing in `/proc/self/maps` names them. Candidate bases are taken from the ELF headers those mappings begin with, and every read is bounds-checked against the image's own segments, so a stale or truncated mapping can no longer fault the target process.
+- Verified on the headset: gestures no longer fire in VD, return immediately after leaving it, and hand tracking plus hand passthrough are unaffected.
+
+## 1.0.8 — 2026-10-18 — PICO 4 (A8110) port
+
+- **PICO 4 support**: remove eye-gaze and face-tracking from the native layer and the managed mod, since the device has neither. `vdhs_layer.c` drops the gaze block (`hk_create_action_space`/`hk_locate_space`, the Mono stack walker, the One-Euro filter), the gaze hook entries, the `eye_gaze_pose` branch in `hk_create_action`, and the gaze permission fix; `vdhs_hand.c` drops the gaze config fields and the `eye_gaze` restore path. `module.prop` / `customize.sh` label the build "PICO 4 slim: no eye/face tracking".
+- **Active-input fallback**: the PICO 4 runtime exports no active-input-device query (every spelling returns `XR_ERROR_FUNCTION_UNSUPPORTED`). The layer now reads `pvr.active.input_device` (`2` = hands) in `vdhs_hand_active_input()` and masks the grip pose's `isActive`, which is what makes VD switch to hands. Verified on VD 1.34.18.0 (`exts 16->19`, `supportsHandTracking=1`, `hand_ext=1`, `locate ... isActive=1`, VD pulls the hand mesh for both hands). SteamVR hands and hand passthrough work.
+- **Packaging**: stage a Mono-compatible `0Harmony.dll` (`netstandard2.0` / `net472`) instead of `net35`, which fails to load on the headset's Mono (`mscorlib, Version=2.0.0.0`). Pack the ZIP with .NET `ZipArchive` and forward slashes (PowerShell 5.1's `Compress-Archive` writes backslashes).
+- The managed `IsControllerActive` switch (Harmony/redirect) is **not** required on PICO 4; `auto` → `dataonly` is enough.
+
 ## 1.0.7 — 2026-10-10
 
 - Balance Mono GC thread-state transitions around gaze-consumer stack walks, correcting the `STATE_BLOCKING / DO_BLOCKING` abort path when the first gaze queries race on entering SteamVR. Skip pointer enhancements if the transition APIs are unavailable; streaming gaze retains upstream results.

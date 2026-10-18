@@ -4,11 +4,12 @@
 SKIPUNZIP=0
 
 if [ "$ARCH" != "arm64" ]; then
-  abort "! VD-PicoEnhance only supports arm64 (this is a PICO 4 Pro / phoenix build)."
+  abort "! VD-PicoEnhance (PICO 4 slim) only supports arm64."
 fi
 
-ui_print "- VD-PicoEnhance $MODVER"
+ui_print "- VD-PicoEnhance $MODVER (PICO 4 slim: no eye/face tracking)"
 ui_print "- target process: VirtualDesktop.Android (untouched official APK)"
+ui_print "- Hand tracking + hand passthrough only; eye-gaze code removed."
 ui_print "- All user features are enabled by default; existing hand_gesture.txt overrides are kept."
 ui_print "- Hand mesh is bundled and installed on first launch if missing."
 ui_print "- SteamVR hand passthrough follows VD's own VR hand-passthrough setting."

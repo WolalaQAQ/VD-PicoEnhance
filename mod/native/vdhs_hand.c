@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/system_properties.h>
 #include <time.h>
 #include <android/log.h>
 
@@ -85,6 +86,27 @@ static int64_t now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+// ---------------------------------------------------------------- active input
+// The PICO input service publishes the current active input device as the system
+// property `pvr.active.input_device` (PICO `ActiveInputDevice`: 0 = HMD,
+// 1 = controller, 2 = hands; any other value means "no decision"). This PICO
+// runtime does not expose the OpenXR `xrGetActiveInputDeviceTypePico` proc
+// through Virtual Desktop's loader (it resolves to XR_ERROR_FUNCTION_UNSUPPORTED
+// here), so the hand/controller hot-switch falls back to this property.
+// Returns 0/1/2, or -1 when the property is missing/unreadable.
+int vdhs_hand_active_input(void) {
+    static int64_t last_ms;
+    static int last = -1;
+    int64_t t = now_ms();
+    if (t - last_ms < 50) return last;   // property reads hit the shared map; keep it light
+    last_ms = t;
+    char buf[PROP_VALUE_MAX];
+    int n = __system_property_get("pvr.active.input_device", buf);
+    if (n <= 0) return last;
+    int v = atoi(buf);
+    return last = (v >= 0 && v <= 2) ? v : -1;
 }
 
 // ---------------------------------------------------------------- mesh blob
@@ -438,12 +460,7 @@ static struct {
     float aim_runtime;         // 1 = use the runtime (PICO system) aim pose when it is valid
     float pt_style;            // 1 = set textureOpacityFactor=1 on VD's projected (hands) layer
     float pt_bg_fix;           // 1 = re-resume a running background layer after another is paused
-    float gaze_log;            // 1 = rate-limited EyeGazeSpace xrLocateSpace log
     float pt_split;            // 1 = one projected layer per hand geometry (PICO keeps one per layer)
-    // Pointer-only stabiliser (vdhs_layer.c gaze_filter): One-Euro on the
-    // head-relative gaze direction, hold on invalid samples, one-sample
-    // confirmation of jumps larger than gaze_jump_deg. Streaming bypasses all.
-    float gaze_filter, gaze_mincutoff, gaze_beta, gaze_hold_ms, gaze_jump_deg;
     // SteamVR trigger diagnosis: per-hand log period of VD's
     // trigger/grip curl formula (0 = off), and the frozen-joints gate
     // (report isActive=0 once the runtime repeats identical joints this long; 0 = off).
@@ -458,7 +475,17 @@ static struct {
     float pt_disc_r;           // sphere radius, meters (must not exceed VD's 0.1 window: excess draws black)
     float pt_max_age_ms;       // locate snapshot older than this is not drawn
     float pt_follow_settings;  // 1 = only in SteamVR with VD's "Passthrough hands" on (vdhs_hand_pt_gate)
-    float gaze_vd_fix;         // 1 = pre-compensate verified VD pointer calls only (never GetEyeState/streaming)
+    // Auto hand switch (vdhs_layer.c): PICO keeps input == controller while a
+    // controller is merely idle, so VD never sees it "put down". Once the grip
+    // poses have not moved for auto_hand_idle_ms the layer masks the controller
+    // pose and VD switches to hands on its own.
+    float auto_hand;           // 1 = on
+    float auto_hand_idle_ms;   // controller still time before switching to hands
+    float auto_hand_move_cm;   // pose delta (cm) that counts as "controller in use"
+    float auto_hand_visible;   // 1 = also require a currently tracked hand
+    // 1 = tell the system (via Pxr_SetAppHandTrackingEnabled) that this app owns
+    // hand input, so PICO turns off its hand-gesture shortcuts (recenter / dock).
+    float pico_app_hands;
 } G = {
     .pinch_on_cm = PINCH_ON_CM_DEFAULT,
     .pinch_off_cm = PINCH_OFF_CM_DEFAULT,
@@ -469,13 +496,12 @@ static struct {
     .menu_face_deg = 40.0f, .menu_pinch_cm = 0.6f, .menu_ext_dot = 0.70f,
     .aim_shoulder = 1.0f, .aim_pitch_deg = 0.0f, .aim_runtime = 1.0f,
     .pt_style = 0.0f, .pt_bg_fix = 1.0f, .pt_split = 1.0f,
-    .gaze_log = 0.0f,
-    .gaze_filter = 1.0f, .gaze_mincutoff = 1.0f, .gaze_beta = 0.5f,
-    .gaze_hold_ms = 150.0f, .gaze_jump_deg = 25.0f,
     .hj_diag_ms = 0.0f, .hj_freeze_ms = 300.0f,
     .pt_hole = 1.0f, .pt_alpha_only = 0.0f,
     .pt_flip_y = 1.0f, .pt_margin_px = 8.0f, .pt_disc_r = 0.1f,
-    .pt_max_age_ms = 300.0f, .pt_follow_settings = 1.0f, .gaze_vd_fix = 1.0f
+    .pt_max_age_ms = 300.0f, .pt_follow_settings = 1.0f,
+    .auto_hand = 1.0f, .auto_hand_idle_ms = 3000.0f, .auto_hand_move_cm = 0.8f, .auto_hand_visible = 0.0f,
+    .pico_app_hands = 1.0f
 };
 
 static void payload_path(const char* file, char* out, size_t cap) {
@@ -500,15 +526,16 @@ static void gesture_config_load(void) {
             { "menu_face_deg", &G.menu_face_deg }, { "menu_pinch_cm", &G.menu_pinch_cm },
             { "menu_ext_dot", &G.menu_ext_dot }, { "aim_shoulder", &G.aim_shoulder },
             { "aim_pitch_deg", &G.aim_pitch_deg }, { "aim_runtime", &G.aim_runtime },
-            { "pt_style", &G.pt_style }, { "pt_bg_fix", &G.pt_bg_fix }, { "gaze_log", &G.gaze_log },
-            { "pt_split", &G.pt_split }, { "gaze_filter", &G.gaze_filter },
-            { "gaze_mincutoff", &G.gaze_mincutoff }, { "gaze_beta", &G.gaze_beta },
-            { "gaze_hold_ms", &G.gaze_hold_ms }, { "gaze_jump_deg", &G.gaze_jump_deg },
+            { "pt_style", &G.pt_style }, { "pt_bg_fix", &G.pt_bg_fix },
+            { "pt_split", &G.pt_split },
             { "hj_diag_ms", &G.hj_diag_ms }, { "hj_freeze_ms", &G.hj_freeze_ms },
             { "pt_hole", &G.pt_hole }, { "pt_alpha_only", &G.pt_alpha_only },
             { "pt_flip_y", &G.pt_flip_y }, { "pt_margin_px", &G.pt_margin_px },
             { "pt_disc_r", &G.pt_disc_r }, { "pt_max_age_ms", &G.pt_max_age_ms },
-            { "pt_follow_settings", &G.pt_follow_settings }, { "gaze_vd_fix", &G.gaze_vd_fix },
+            { "pt_follow_settings", &G.pt_follow_settings },
+            { "auto_hand", &G.auto_hand }, { "auto_hand_idle_ms", &G.auto_hand_idle_ms },
+            { "auto_hand_move_cm", &G.auto_hand_move_cm }, { "auto_hand_visible", &G.auto_hand_visible },
+            { "pico_app_hands", &G.pico_app_hands },
         };
         char line[256];
         while (fgets(line, sizeof line, f)) {
@@ -531,16 +558,16 @@ static void gesture_config_load(void) {
     }
     LOGI("aim: config %s pinch=%.1f/%.1f/%.1fcm face=%.0f/%.0fdeg menu=%.0f/%.0fms ext=%.2f curl=%.2f smooth=%.2f "
          "menu_face=%.0fdeg menu_pinch=%.1fcm menu_ext=%.2f shoulder=%.2f pitch=%.0fdeg aim_runtime=%.0f "
-         "pt_style=%.0f pt_bg_fix=%.0f gaze_log=%.0f pt_split=%.0f gaze=%.0f/%.2fHz/%.2f/%.0fms/%.0fdeg "
+         "pt_style=%.0f pt_bg_fix=%.0f pt_split=%.0f "
          "hj_diag=%.0fms hj_freeze=%.0fms pt_hole=%.0f pt_alpha_only=%.0f pt_flip_y=%.0f margin=%.0fpx disc_r=%.3fm maxage=%.0fms "
-         "pt_follow=%.0f gaze_vd_fix=%.0f",
+         "pt_follow=%.0f auto_hand=%.0f idle=%.0fms move=%.1fcm vis=%.0f pico_app_hands=%.0f",
          f ? "loaded" : "defaults", G.pinch_on_cm, G.pinch_off_cm, G.pinch_full_cm, G.face_on_deg, G.face_off_deg,
          G.menu_hold_ms, G.menu_cooldown_ms, G.ext_dot, G.curl_dot, G.aim_smooth,
          G.menu_face_deg, G.menu_pinch_cm, G.menu_ext_dot, G.aim_shoulder, G.aim_pitch_deg, G.aim_runtime,
-         G.pt_style, G.pt_bg_fix, G.gaze_log, G.pt_split,
-         G.gaze_filter, G.gaze_mincutoff, G.gaze_beta, G.gaze_hold_ms, G.gaze_jump_deg,
+         G.pt_style, G.pt_bg_fix, G.pt_split,
          G.hj_diag_ms, G.hj_freeze_ms, G.pt_hole, G.pt_alpha_only, G.pt_flip_y, G.pt_margin_px, G.pt_disc_r,
-         G.pt_max_age_ms, G.pt_follow_settings, G.gaze_vd_fix);
+         G.pt_max_age_ms, G.pt_follow_settings,
+         G.auto_hand, G.auto_hand_idle_ms, G.auto_hand_move_cm, G.auto_hand_visible, G.pico_app_hands);
 }
 
 static pthread_once_t g_cfg_once = PTHREAD_ONCE_INIT;
@@ -549,13 +576,7 @@ float vdhs_hand_cfg(const char* key) {
     pthread_once(&g_cfg_once, gesture_config_load);
     if (!strcmp(key, "pt_style")) return G.pt_style;
     if (!strcmp(key, "pt_bg_fix")) return G.pt_bg_fix;
-    if (!strcmp(key, "gaze_log")) return G.gaze_log;
     if (!strcmp(key, "pt_split")) return G.pt_split;
-    if (!strcmp(key, "gaze_filter")) return G.gaze_filter;
-    if (!strcmp(key, "gaze_mincutoff")) return G.gaze_mincutoff;
-    if (!strcmp(key, "gaze_beta")) return G.gaze_beta;
-    if (!strcmp(key, "gaze_hold_ms")) return G.gaze_hold_ms;
-    if (!strcmp(key, "gaze_jump_deg")) return G.gaze_jump_deg;
     if (!strcmp(key, "pt_hole")) return G.pt_hole;
     if (!strcmp(key, "pt_alpha_only")) return G.pt_alpha_only;
     if (!strcmp(key, "pt_flip_y")) return G.pt_flip_y;
@@ -563,7 +584,11 @@ float vdhs_hand_cfg(const char* key) {
     if (!strcmp(key, "pt_disc_r")) return G.pt_disc_r;
     if (!strcmp(key, "pt_max_age_ms")) return G.pt_max_age_ms;
     if (!strcmp(key, "pt_follow_settings")) return G.pt_follow_settings;
-    if (!strcmp(key, "gaze_vd_fix")) return G.gaze_vd_fix;
+    if (!strcmp(key, "auto_hand")) return G.auto_hand;
+    if (!strcmp(key, "auto_hand_idle_ms")) return G.auto_hand_idle_ms;
+    if (!strcmp(key, "auto_hand_move_cm")) return G.auto_hand_move_cm;
+    if (!strcmp(key, "auto_hand_visible")) return G.auto_hand_visible;
+    if (!strcmp(key, "pico_app_hands")) return G.pico_app_hands;
     return 0;
 }
 
@@ -1109,12 +1134,8 @@ static int hashset_count(MP set, MP get_count) {
     return *(int32_t*)M.object_unbox(boxed);
 }
 
-static char* obj_to_utf8(MP obj) {
-    return obj ? M.string_to_utf8(obj) : NULL;
-}
-
-// Static auto-property value/setter via its property accessors (works for
-// both static and instance properties; `self` NULL for static).
+// Static auto-property value via its property accessor (works for both static
+// and instance properties; `self` NULL for static).
 static MP prop_get(MP klass, MP self, const char* name) {
     for (MP k = klass; k; k = M.class_get_parent(k)) {
         MP p = M.class_get_property_from_name(k, name);
@@ -1127,94 +1148,12 @@ static MP prop_get(MP klass, MP self, const char* name) {
     }
     return NULL;
 }
-static int prop_set(MP klass, MP self, const char* name, void* arg) {
-    for (MP k = klass; k; k = M.class_get_parent(k)) {
-        MP p = M.class_get_property_from_name(k, name);
-        MP s = p ? M.property_get_set_method(p) : NULL;
-        if (!s) continue;
-        void* argv[1] = { arg };
-        MP exc = NULL;
-        M.runtime_invoke(s, self, argv, &exc);
-        if (exc) { log_exc(name, exc); return -1; }
-        return 0;
-    }
-    return -2;
-}
 
-// VD 1.34.22 on PICO asks for permissions that do not exist there
-// (VrApp.cs:176 FACE = com.oculus.permission.FACE_TRACKING; InputTab.cs:84
-// EYE = android.permission.EYE_TRACKING_FINE). Requests fail at once, so
-// "Forward tracking data" (StreamingTab.cs:431/1196) and "Eye gaze"
-// (InputTab.cs:151/511) switch themselves off. Point them at the granted PICO
-// permission. Must run after DeterminePlatform (VrApp.OnCreate) and before
-// ControlPanel.LoadContent builds the tabs; xrCreateInstance is in between.
-int vdhs_hand_fix_permissions(void) {
-    if (!mono_resolve()) return -1;
-    static const char kPicoEye[] = "com.picovr.permission.EYE_TRACKING";
-    int rc = 0;
-
-    // 1) DynamicSettings.Default.FaceTrackingPermission (instance auto-property).
-    MP img = find_image("VirtualDesktop.Mobile");
-    MP ds = img ? M.class_from_name(img, "VirtualDesktop.Mobile", "DynamicSettings") : NULL;
-    MP def = ds ? prop_get(ds, NULL, "Default") : NULL;
-    if (!def) { LOGE("perm: DynamicSettings.Default not found (img=%p cls=%p)", img, ds); rc = -2; }
-    else {
-        char* face = obj_to_utf8(prop_get(ds, def, "FaceTrackingPermission"));
-        char* eye = obj_to_utf8(prop_get(ds, def, "EyeTrackingPermission"));
-        LOGI("perm: DynamicSettings eye=%s face=%s", eye ? eye : "(null)", face ? face : "(null)");
-        if (face && strcmp(face, "com.oculus.permission.FACE_TRACKING") == 0 && eye && strstr(eye, "picovr")) {
-            // Face tracking on PICO has no Android permission VD knows about;
-            // use the granted PICO eye-tracking one so the gate passes.
-            MP s = M.string_new(M.domain_get(), kPicoEye);
-            int r = prop_set(ds, def, "FaceTrackingPermission", s);
-            char* now = obj_to_utf8(prop_get(ds, def, "FaceTrackingPermission"));
-            LOGI("perm: FaceTrackingPermission -> %s (r=%d)", now ? now : "(null)", r);
-            if (r) rc = -3;
-            if (now) M.mono_free(now);
-        }
-        if (face) M.mono_free(face);
-        if (eye) M.mono_free(eye);
-    }
-
-    // 2) InputTab._eyeTrackingPermission is assigned in InputTab's constructor
-    //    (InputTab.cs:84), so it is fixed later from the permission probe hook
-    //    below; here we only confirm the class exists.
-    MP it = img ? M.class_from_name(img, "VirtualDesktop.Mobile", "InputTab") : NULL;
-    LOGI("perm: InputTab class=%p", it);
-    return rc;
-}
-
-// UserSettings.Default.PreferEyeGazeInput as saved, captured at xrCreateInstance
-// (before ControlPanel.LoadContent). InputTab's constructor checks the wrong
-// permission name before we can fix it (InputTab.cs:84 then :151) and clears
-// the setting while Game has not subscribed to the change event yet
-// (Game.cs:1416 vs :1426): the checkbox shows off, the HMD keeps gaze on.
-static int g_saved_eye_gaze = -1;
+// UserSettings.Default accessor (used by the SteamVR hand-passthrough gate).
 static MP user_settings(void) {
     MP img = find_image("VirtualDesktop.Mobile");
     MP us = img ? M.class_from_name(img, "VirtualDesktop.Mobile", "UserSettings") : NULL;
     return us ? prop_get(us, NULL, "Default") : NULL;
-}
-void vdhs_hand_capture_settings(void) {
-    if (!mono_resolve()) return;
-    MP def = user_settings();
-    MP v = def ? prop_get(M.object_get_class(def), def, "PreferEyeGazeInput") : NULL;
-    if (v) g_saved_eye_gaze = *(uint8_t*)M.object_unbox(v);
-    LOGI("perm: saved PreferEyeGazeInput=%d", g_saved_eye_gaze);
-}
-// After InputTab's permission name is fixed: put the saved value back through
-// the property setter, so the checkbox, the save file and the HMD agree.
-static void restore_eye_gaze(void) {
-    if (g_saved_eye_gaze != 1) return;
-    MP def = user_settings();
-    if (!def) return;
-    MP k = M.object_get_class(def);
-    MP v = prop_get(k, def, "PreferEyeGazeInput");
-    if (!v || *(uint8_t*)M.object_unbox(v)) { g_saved_eye_gaze = 0; return; }
-    uint8_t on = 1;
-    int r = prop_set(k, def, "PreferEyeGazeInput", &on);
-    LOGI("perm: PreferEyeGazeInput restored to 1 (r=%d)", r);
-    g_saved_eye_gaze = 0;
 }
 
 // ---------------------------------------------------------------- pt_hole gate
@@ -1362,30 +1301,6 @@ int vdhs_hand_pt_gate(uint64_t* chains, int max, int* nchains, int hint_on) {
     if (chains && n > 0) memcpy(chains, cached, (size_t)n * sizeof *chains);
     if (nchains) *nchains = n;
     return state > 0;
-}
-
-// Re-point InputTab._eyeTrackingPermission (private static) at the PICO
-// permission. Idempotent; called whenever the layer gets a chance on VD's thread.
-int vdhs_hand_fix_inputtab(void) {
-    if (!mono_resolve()) return -1;
-    MP img = find_image("VirtualDesktop.Mobile");
-    MP it = img ? M.class_from_name(img, "VirtualDesktop.Mobile", "InputTab") : NULL;
-    MP f = it ? M.class_get_field_from_name(it, "_eyeTrackingPermission") : NULL;
-    MP vt = it ? M.class_vtable(M.domain_get(), it) : NULL;
-    if (!f || !vt) return -2;
-    MP cur = NULL;
-    M.field_static_get_value(vt, f, &cur);
-    char* s = obj_to_utf8(cur);
-    int changed = 0;
-    if (s && !strcmp(s, "android.permission.EYE_TRACKING_FINE")) {
-        MP ns = M.string_new(M.domain_get(), "com.picovr.permission.EYE_TRACKING");
-        M.field_static_set_value(vt, f, ns);
-        changed = 1;
-        LOGI("perm: InputTab._eyeTrackingPermission %s -> com.picovr.permission.EYE_TRACKING", s);
-        restore_eye_gaze();
-    }
-    if (s) M.mono_free(s);
-    return changed;
 }
 
 // Runs on VD's own thread inside the P/Invoke of xrCreateInstance, i.e. after

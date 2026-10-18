@@ -13,9 +13,11 @@
 //   xrGetInstanceProcAddr                  (sym)    extension-function wrapper table
 //   xrCreateAction                         0x58cd4  remember "grip_pose"
 //   xrGetActionStatePose                   0x5a054  isActive=false while PICO input==hand
+//                                                    or the controllers are idle (auto hand)
 //   xrGetSystemProperties                  0x54058  log supportsHandTracking (VD's feature gate)
-//   xrEndFrame / xrPollEvent               (sym)    layer-list / passthrough event logs, permission fixes
-//   xrCreateActionSpace / xrLocateSpace    (sym)    EyeGazeSpace log (gaze_log)
+//   xrEndFrame / xrPollEvent               (sym)    layer-list / passthrough event logs
+//   xrCreateActionSpace / xrLocateSpace    (sym)    auto hand switch: track grip-space
+//                                                    motion (optional, hook kept if exported)
 //
 // Rollback: mode.txt=1 skips the layer (vdhs_payload.c).
 #define _GNU_SOURCE
@@ -123,6 +125,9 @@ static const char* const kLayerExts[] = { "XR_FB_hand_tracking_mesh", "XR_FB_han
 enum { kLayerExtCount = (int)(sizeof kLayerExts / sizeof kLayerExts[0]) };
 static const int g_advertise_layer_exts = 1;
 static const char kHandExt[] = "XR_EXT_hand_tracking";
+// PICO's own hand tracking ext: gates xrSetAppHandTrackingEnabledPico (runtime
+// logs "Requires XR_PICO_hand_tracking extension enabled").
+static const char kPicoHandExt[] = "XR_PICO_hand_tracking";
 // Xenko.OpenXR.Extension values (from the app's managed assembly).
 enum { kExtEnumHandTracking = 27, kExtEnumFbAim = 50, kExtEnumFbMesh = 52 };
 
@@ -133,6 +138,89 @@ typedef struct { float x, y, z, w; } XrQuaternionf;
 typedef struct { float x, y, z; } XrVector3f;
 typedef struct { XrQuaternionf orientation; XrVector3f position; } XrPosef;
 typedef uint64_t XrHandle;
+
+// ---------------------------------------------------------------- auto hand switch
+// PICO keeps its input device on "controller" while a controller is merely set
+// down, so VD never sees the "put it down" transition. Watch the grip action
+// spaces' poses and, once they have been still for auto_hand_idle_ms, mask the
+// grip pose so VD switches to hands by itself (see effective_hand_mode()).
+typedef uint64_t XrSpace;
+typedef int64_t XrTime;
+typedef struct {
+    uint32_t type; const void* next;
+    XrAction action; XrPath subactionPath; XrPosef poseInActionSpace;
+} XrActionSpaceCreateInfo;
+typedef struct { uint32_t type; void* next; uint64_t locationFlags; XrPosef pose; } XrSpaceLocation;
+#define XR_SPACE_LOCATION_POSITION_VALID_BIT 0x00000001ULL
+typedef XrResult (*PFN_create_action_space)(XrSession, const XrActionSpaceCreateInfo*, XrSpace*);
+typedef XrResult (*PFN_locate_space)(XrSpace, XrSpace, XrTime, XrSpaceLocation*);
+
+static PFN_create_action_space g_orig_create_action_space;
+static PFN_locate_space         g_orig_locate_space;
+static XrSpace g_grip_space[MAX_GRIP];
+static char g_grip_space_name[MAX_GRIP][64];   // action name bound to each tracked space
+static volatile int g_grip_space_n;
+static struct { XrSpace space; float x, y, z; int have; int move_logged; } g_ctrl[MAX_GRIP];
+static volatile int64_t g_ctrl_last_move_ms;   // last tracked-space movement (> threshold)
+static volatile int64_t g_ctrl_last_seen_ms;   // last tracked space located at all
+static int g_auto_hand_logged;                  // transition log latch
+static float g_auto_move_cm;                    // cached auto_hand_move_cm
+static XrSpace g_ref_base;                       // base space captured from a VD locate
+static volatile int64_t g_pred_time;             // last xrWaitFrame predictedDisplayTime
+
+// Every xrCreateAction name, so the spaces VD binds can be identified in logs.
+#define MAX_ACTIONS 64
+static struct { XrAction action; char name[64]; } g_actions[MAX_ACTIONS];
+static volatile int g_actions_n;
+static const char* action_name(XrAction a) {
+    int n = g_actions_n;
+    for (int i = 0; i < n; i++) if (g_actions[i].action == a) return g_actions[i].name;
+    return "?";
+}
+
+// VD resolves these two through xrGetInstanceProcAddr (not the loader export),
+// so they are wrapped in g_gipa_table rather than inline-hooked.
+static XrResult hk_create_action_space(XrSession, const XrActionSpaceCreateInfo*, XrSpace*);
+static XrResult hk_locate_space(XrSpace, XrSpace, XrTime, XrSpaceLocation*);
+static void ctrl_poll(void);
+static void pico_app_hands_once(void);
+
+// ---------------------------------------------------------------- controller input
+// Once VD is showing hands it stops locating the aim_pose spaces, so a pick-up
+// is invisible via motion. Buttons/triggers/axes are still polled through these
+// three, so any (re)activation marks fresh controller activity.
+typedef struct { uint32_t type; void* next; XrBool32 isActive; XrBool32 currentState; XrBool32 changed; int64_t lastChange; } XrActionStateBoolean;
+typedef struct { uint32_t type; void* next; XrBool32 isActive; float currentState; XrBool32 changed; int64_t lastChange; } XrActionStateFloat;
+typedef struct { uint32_t type; void* next; XrBool32 isActive; float x, y; XrBool32 changed; int64_t lastChange; } XrActionStateVector2f;
+typedef XrResult (*PFN_get_bool)(XrSession, const XrActionStateGetInfo*, XrActionStateBoolean*);
+typedef XrResult (*PFN_get_float)(XrSession, const XrActionStateGetInfo*, XrActionStateFloat*);
+typedef XrResult (*PFN_get_vec2)(XrSession, const XrActionStateGetInfo*, XrActionStateVector2f*);
+static PFN_get_bool  g_orig_get_bool;
+static PFN_get_float g_orig_get_float;
+static PFN_get_vec2  g_orig_get_vec2;
+static XrResult hk_get_bool(XrSession, const XrActionStateGetInfo*, XrActionStateBoolean*);
+static XrResult hk_get_float(XrSession, const XrActionStateGetInfo*, XrActionStateFloat*);
+static XrResult hk_get_vec2(XrSession, const XrActionStateGetInfo*, XrActionStateVector2f*);
+
+// xrWaitFrame: keep the latest predicted display time so we can poll the
+// controller spaces ourselves while VD is in hand mode.
+typedef struct { uint32_t type; void* next; XrTime predictedDisplayTime; XrTime predictedDisplayPeriod; XrBool32 shouldRender; } XrFrameState;
+typedef XrResult (*PFN_wait_frame)(XrSession, XrFrameState*);
+static PFN_wait_frame g_orig_wait_frame;
+static XrResult hk_wait_frame(XrSession s, XrFrameState* st) {
+    if (!g_orig_wait_frame) return (XrResult)-1;
+    XrResult r = g_orig_wait_frame(s, st);
+    if (r == 0 && st && st->predictedDisplayTime) g_pred_time = st->predictedDisplayTime;
+    return r;
+}
+
+// Note fresh controller activity the moment any button/axis goes active.
+static void ctrl_input_seen(const char* name) {
+    int64_t t = now_ms();
+    g_ctrl_last_move_ms = t;
+    static int64_t last_log;
+    if (t - last_log > 1000) { last_log = t; LOGI("input: controller button/axis active (%s)", name); }
+}
 
 typedef struct { uint32_t type; const void* next; uint64_t flags; } XrPassthroughCreateInfoFB;
 typedef struct { uint32_t type; const void* next; XrHandle passthrough; uint64_t flags; int32_t purpose; } XrPassthroughLayerCreateInfoFB;
@@ -504,6 +592,12 @@ static gipa_entry g_gipa_table[] = {
     ROW("xrPassthroughLayerSetStyleFB",     w_pt_layer_style,              g_next_pt_layer_style),
     ROW("xrDestroyGeometryInstanceFB",      w_destroy_geom,                g_next_destroy_geom),
     ROW("xrDestroyPassthroughLayerFB",      w_destroy_pt_layer,            g_next_destroy_pt_layer),
+    ROW("xrCreateActionSpace",              hk_create_action_space,        g_orig_create_action_space),
+    ROW("xrLocateSpace",                    hk_locate_space,               g_orig_locate_space),
+    ROW("xrGetActionStateBoolean",          hk_get_bool,                   g_orig_get_bool),
+    ROW("xrGetActionStateFloat",            hk_get_float,                  g_orig_get_float),
+    ROW("xrGetActionStateVector2f",         hk_get_vec2,                   g_orig_get_vec2),
+    ROW("xrWaitFrame",                      hk_wait_frame,                 g_orig_wait_frame),
     { NULL, NULL, NULL },   // sentinel
 };
 #undef ROW
@@ -544,28 +638,60 @@ static XrResult hk_enum(const char* layer, uint32_t cap, uint32_t* count, XrExte
         return r;
     }
 
-    // Append layer-served extensions to the runtime list.
+    // Append the extensions we make available to the runtime list. The loader
+    // validates enabled names against this list, so XR_PICO_hand_tracking (which
+    // gates xrSetAppHandTrackingEnabledPico) must appear here even though the
+    // runtime itself does not advertise it.
     uint32_t n = 0;
     XrResult r = g_orig_enum(NULL, 0, &n, NULL);
     if (r != 0) return r;
-    uint32_t total = n + kLayerExtCount;
+    uint32_t total = n + kLayerExtCount + 1;   // +1 = XR_PICO_hand_tracking
     if (count) *count = total;
     if (cap == 0) return 0;
     if (cap < total) return -11;   // XR_ERROR_SIZE_INSUFFICIENT
     r = g_orig_enum(NULL, cap, &n, props);
     if (r != 0) return r;
-    for (int i = 0; i < kLayerExtCount; i++) {
-        XrExtensionProperties* p = &props[n + i];
-        memset(p->extensionName, 0, sizeof p->extensionName);
-        strncpy(p->extensionName, kLayerExts[i], sizeof p->extensionName - 1);
-        p->extensionVersion = 1;
+
+    static int dumped;
+    if (!dumped) {
+        dumped = 1;
+        for (uint32_t i = 0; i < n; i++) LOGI("enum[%u] = %s", i, props[i].extensionName);
     }
+
+    const char* add[8];
+    uint32_t na = 0;
+    for (int i = 0; i < kLayerExtCount; i++) add[na++] = kLayerExts[i];
+    add[na++] = kPicoHandExt;
+    uint32_t w = n;
+    for (uint32_t i = 0; i < na; i++) {
+        int dup = 0;
+        for (uint32_t j = 0; j < n; j++)
+            if (!strcmp(props[j].extensionName, add[i])) { dup = 1; break; }
+        if (dup) continue;
+        memset(props[w].extensionName, 0, sizeof props[w].extensionName);
+        strncpy(props[w].extensionName, add[i], sizeof props[w].extensionName - 1);
+        props[w].extensionVersion = 1;
+        w++;
+    }
+    if (count) *count = w;
     return 0;
 }
 
 static int is_layer_ext(const char* s) {
     for (int i = 0; i < kLayerExtCount; i++) if (!strcmp(s, kLayerExts[i])) return 1;
     return 0;
+}
+
+// Remove the first occurrence of `drop` from `names` in place; returns the new
+// count. Used by the createInstance fallbacks.
+static uint32_t drop_ext(const char** names, uint32_t m, const char* drop) {
+    uint32_t w = 0;
+    int removed = 0;
+    for (uint32_t i = 0; i < m; i++) {
+        if (!removed && !strcmp(names[i], drop)) { removed = 1; continue; }
+        names[w++] = names[i];
+    }
+    return w;
 }
 
 static XrResult hk_create_instance(const XrInstanceCreateInfo* ci, XrInstance* out) {
@@ -575,23 +701,27 @@ static XrResult hk_create_instance(const XrInstanceCreateInfo* ci, XrInstance* o
 
     uint32_t n = ci->enabledExtensionCount;
     // Neither the hand nor controller extension need be present in VD's list.
-    const char** names = (const char**)calloc((size_t)n + 2, sizeof *names);
+    const char** names = (const char**)calloc((size_t)n + 4, sizeof *names);
     if (!names) return g_orig_create_instance(ci, out);
     uint32_t m = 0;
-    int has_ctrl = 0, stripped = 0;
+    int has_ctrl = 0, stripped = 0, has_pico_hand = 0;
     for (uint32_t i = 0; i < n; i++) {
         const char* s = ci->enabledExtensionNames[i];
         if (!s) continue;
         if (is_layer_ext(s)) { stripped++; continue; }
         if (!strcmp(s, kControllerExt)) has_ctrl = 1;
+        if (!strcmp(s, kPicoHandExt)) has_pico_hand = 1;
         names[m++] = s;
     }
 
-    // Order matters for the fallbacks below: [VD list][hand ext][controller ext].
+    // Order matters for the fallbacks below:
+    // [VD list][hand ext][pico hand ext][controller ext].
     int has_hand = 0;
     for (uint32_t i = 0; i < m; i++) if (!strcmp(names[i], kHandExt)) has_hand = 1;
     int hand_added = !has_hand;
     if (hand_added) names[m++] = kHandExt;
+    int pico_hand_added = !has_pico_hand;
+    if (pico_hand_added) names[m++] = kPicoHandExt;
     int added = !has_ctrl && g_marked;
     if (added) names[m++] = kControllerExt;
 
@@ -599,8 +729,9 @@ static XrResult hk_create_instance(const XrInstanceCreateInfo* ci, XrInstance* o
     copy.enabledExtensionCount = m;
     copy.enabledExtensionNames = names;
     XrResult r = g_orig_create_instance(&copy, out);
-    LOGI("createInstance: r=%d exts %u->%u (vd_had_ctrl=%d added=%d stripped=%d) (+%lld ms)",
-         r, n, m, has_ctrl, added, stripped, TS());
+    LOGI("createInstance: r=%d exts %u->%u (vd_had_ctrl=%d added=%d stripped=%d pico_hand=%d) (+%lld ms)",
+         r, n, m, has_ctrl, added, stripped, has_pico_hand || pico_hand_added, TS());
+    for (uint32_t i = 0; i < m; i++) LOGI("createInstance: ext[%u] = %s", i, names[i]);
 
     // The loader caches the runtime's extension list when it loads the runtime
     // (runtime_interface.cpp SetSupportedExtensions). If that happened before
@@ -613,14 +744,25 @@ static XrResult hk_create_instance(const XrInstanceCreateInfo* ci, XrInstance* o
         LOGI("createInstance: retry after runtime reload r=%d (+%lld ms)", r, TS());
     }
     // Never leave VD without an instance because of the layer: VD crashes on a
-    // failed xrCreateInstance (ReleasePassthrough NRE, observed).
+    // failed xrCreateInstance (ReleasePassthrough NRE, observed). Drop the
+    // extensions we appended, newest first.
     if (r == XR_ERROR_EXTENSION_NOT_PRESENT && added) {
-        copy.enabledExtensionCount = --m;
+        m = drop_ext(names, m, kControllerExt);
+        copy.enabledExtensionCount = m;
+        added = 0;
         r = g_orig_create_instance(&copy, out);
-        LOGE("createInstance: controller ext still rejected; without it r=%d", r);
+        LOGE("createInstance: controller ext rejected; without it r=%d", r);
+    }
+    if (r == XR_ERROR_EXTENSION_NOT_PRESENT && pico_hand_added) {
+        m = drop_ext(names, m, kPicoHandExt);
+        copy.enabledExtensionCount = m;
+        pico_hand_added = 0;
+        r = g_orig_create_instance(&copy, out);
+        LOGE("createInstance: pico hand ext rejected; without it r=%d", r);
     }
     if (r == XR_ERROR_EXTENSION_NOT_PRESENT && hand_added) {
-        copy.enabledExtensionCount = --m;
+        m = drop_ext(names, m, kHandExt);
+        copy.enabledExtensionCount = m;
         hand_added = 0;
         r = g_orig_create_instance(&copy, out);
         LOGE("createInstance: hand ext rejected; VD list only r=%d", r);
@@ -649,12 +791,14 @@ static XrResult hk_create_instance(const XrInstanceCreateInfo* ci, XrInstance* o
         int irc = vdhs_hand_inject_managed(vals, nv);
         LOGI("createInstance: managed inject rc=%d (%d values, mesh=%d) (+%lld ms)", irc, nv, nv == 3, TS());
     }
-    if (r == 0) vdhs_hand_capture_settings();
     return r;
 }
 
 static XrResult hk_gipa(XrInstance inst, const char* name, PFN_xrVoidFunction* fn) {
     if (!vdhs_layer_active()) return g_orig_gipa(inst, name, fn);
+    // Retry the runtime mark here too: by the time VD pulls its proc table the
+    // forward loader is fully initialised, which the earlier attempts are not.
+    try_mark("gipa");
     // Functions the layer implements itself: the runtime would answer
     // FUNCTION_UNSUPPORTED and VD's GetDelegate CheckError()s (XR.cs:641-649).
     if (inst && name && fn && vdhs_hand_gipa_self(name, fn)) return 0;
@@ -663,7 +807,9 @@ static XrResult hk_gipa(XrInstance inst, const char* name, PFN_xrVoidFunction* f
     if (vdhs_hand_gipa_wrap(name, fn)) return r;
     for (gipa_entry* e = g_gipa_table; e->name; e++) {
         if (strcmp(e->name, name) != 0) continue;
-        *e->next = *fn;
+        // Keep an original already captured by an inline hook: overwriting it
+        // with a pointer to the same hooked export would recurse.
+        if (!*e->next) *e->next = *fn;
         *fn = e->wrapper;
         LOGI("gipa: wrapped %s", name);
         break;
@@ -681,8 +827,6 @@ static XrResult hk_get_system_props(XrInstance inst, uint64_t sys, XrBaseOutStru
     for (XrBaseOutStructure* s = props ? (XrBaseOutStructure*)props->next : NULL; s; s = (XrBaseOutStructure*)s->next) {
         if (s->type == 1000051000u)        // XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT
             LOGI("systemProps: r=%d supportsHandTracking=%u", r, ((XrSystemHandTrackingPropertiesEXT*)s)->supportsHandTracking);
-        else if (s->type == 1000030001u)   // XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT
-            LOGI("systemProps: r=%d supportsEyeGazeInteraction=%u", r, ((XrSystemHandTrackingPropertiesEXT*)s)->supportsHandTracking);
     }
     return r;
 }
@@ -710,20 +854,9 @@ static XrResult hk_end_frame(XrSession s, const XrFrameEndInfo* fi_vd) {
     // Zero-copy alpha hole: record the VR projection layer's views / swapchains
     // and OR 0x6 into its flags before the compositor sees the frame.
     vdhs_pt_on_end_frame(fi);
+    ctrl_poll();
+    pico_app_hands_once();
     XrResult r = g_orig_end_frame(s, fi);
-    // Permission-name fixes need the managed UI tabs, which are built after the
-    // instance exists; retry from VD's render thread (Mono-attached P/Invoke)
-    // every 2 s, and keep checking InputTab in case the tab is rebuilt.
-    {
-        static int64_t next_ms;
-        static int perm_done;
-        int64_t t = now_ms();
-        if (t >= next_ms) {
-            next_ms = t + 2000;
-            if (!perm_done) perm_done = vdhs_hand_fix_permissions() == 0;
-            vdhs_hand_fix_inputtab();
-        }
-    }
     if (!fi) return r;
     static uint64_t last_sig;
     static int64_t last_ms;
@@ -771,431 +904,22 @@ static XrResult hk_poll_event(XrInstance inst, XrBaseOutStructure* ev) {
     return r;
 }
 
-// EyeGazeSpace = action space of VD's "eye_gaze_pose" action. Only verified
-// pointer consumers receive the optional smoothing / coordinate compensation.
-static volatile XrAction g_gaze_action;
-static volatile XrHandle g_gaze_space, g_gaze_session;
-typedef struct { uint32_t type; const void* next; XrAction action; XrPath subactionPath; XrPosef poseInActionSpace; } XrActionSpaceCreateInfo;
-typedef struct { uint32_t type; void* next; uint64_t locationFlags; XrPosef pose; } XrSpaceLocation;
-typedef XrResult (*PFN_create_action_space)(XrSession, const XrActionSpaceCreateInfo*, XrHandle*);
-typedef XrResult (*PFN_locate_space)(XrHandle, XrHandle, int64_t, XrSpaceLocation*);
-static PFN_create_action_space g_orig_create_action_space;
-static PFN_locate_space g_orig_locate_space;
-
-static XrResult hk_create_action_space(XrSession s, const XrActionSpaceCreateInfo* ci, XrHandle* out) {
-    if (!vdhs_layer_active()) return g_orig_create_action_space(s, ci, out);
-    XrResult r = g_orig_create_action_space(s, ci, out);
-    if (r == 0 && ci && out && g_gaze_action && ci->action == g_gaze_action) {
-        g_gaze_space = *out;
-        g_gaze_session = s;
-        LOGI("gaze: EyeGazeSpace=0x%llx session=0x%llx", (unsigned long long)*out, (unsigned long long)s);
-    }
-    return r;
-}
-
-// Pointer-only stabiliser (hand_gesture.txt gaze_filter, default 1).
-// This is the mod's additional filter, not a runtime or VD filter. The upstream
-// gaze pose is head pose ∘ gaze. The direction is taken relative to the head
-// (VIEW space at the same time and base), One-Euro filtered there, and
-// recomposed with the current head so head motion is not delayed. An invalid
-// sample within gaze_hold_ms of the last valid one returns the held direction.
-// Streaming must bypass this entire path: smoothing, jump confirmation and
-// invalid-sample holds can all delay a foveated region after an eye movement.
-typedef struct { uint32_t type; const void* next; int32_t referenceSpaceType; XrPosef poseInReferenceSpace; } XrRefSpaceCI;
-typedef XrResult (*PFN_create_ref_space)(XrSession, const XrRefSpaceCI*, XrHandle*);
-
-static XrQuaternionf gq_mul(XrQuaternionf a, XrQuaternionf b) {
-    XrQuaternionf r = { a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
-                        a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w, a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z };
-    return r;
-}
-static XrQuaternionf gq_conj(XrQuaternionf q) { XrQuaternionf r = { -q.x, -q.y, -q.z, q.w }; return r; }
-static XrVector3f gq_fwd(XrQuaternionf q) {   // q * (0,0,-1)
-    XrVector3f v = { -2.0f * (q.x * q.z + q.w * q.y), -2.0f * (q.y * q.z - q.w * q.x), -(1.0f - 2.0f * (q.x * q.x + q.y * q.y)) };
-    return v;
-}
-static float gv_dot(XrVector3f a, XrVector3f b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
-static XrVector3f gv_norm(XrVector3f a) {
-    float l = sqrtf(gv_dot(a, a));
-    XrVector3f r = { 0, 0, 0 };
-    if (l > 1e-6f) { r.x = a.x / l; r.y = a.y / l; r.z = a.z / l; }
-    return r;
-}
-static float gv_angle_deg(XrVector3f a, XrVector3f b) {
-    float d = gv_dot(a, b);
-    return acosf(d > 1 ? 1 : d < -1 ? -1 : d) * 57.29578f;
-}
-// Shortest-arc rotation from (0,0,-1) to unit d.
-static XrQuaternionf gq_from_fwd(XrVector3f d) {
-    // cross((0,0,-1), d) = (d.y, -d.x, 0); dot = -d.z
-    XrQuaternionf q = { d.y, -d.x, 0.0f, 1.0f - d.z };
-    float l = sqrtf(q.x * q.x + q.y * q.y + q.w * q.w);
-    if (l < 1e-6f) { XrQuaternionf flip = { 0, 1, 0, 0 }; return flip; }   // d == (0,0,1)
-    q.x /= l; q.y /= l; q.w /= l;
-    return q;
-}
-
-// One-Euro filter on a 3-vector (Casiez et al. 2012).
-typedef struct { int init; XrVector3f x, dx; } euro3;
-static float euro_alpha(float cutoff, float dt) {
-    float tau = 1.0f / (6.2831853f * cutoff);
-    return 1.0f / (1.0f + tau / dt);
-}
-static XrVector3f euro3_step(euro3* f, XrVector3f v, float dt, float mincutoff, float beta, float dcutoff) {
-    if (!f->init || dt <= 0) { f->init = 1; f->x = v; f->dx.x = f->dx.y = f->dx.z = 0; return v; }
-    XrVector3f d = { (v.x - f->x.x) / dt, (v.y - f->x.y) / dt, (v.z - f->x.z) / dt };
-    float ad = euro_alpha(dcutoff, dt);
-    f->dx.x += ad * (d.x - f->dx.x); f->dx.y += ad * (d.y - f->dx.y); f->dx.z += ad * (d.z - f->dx.z);
-    float speed = sqrtf(gv_dot(f->dx, f->dx));
-    float a = euro_alpha(mincutoff + beta * speed, dt);
-    f->x.x += a * (v.x - f->x.x); f->x.y += a * (v.y - f->x.y); f->x.z += a * (v.z - f->x.z);
-    return f->x;
-}
-
-// VD queries gaze on both the render thread and EyeData Loop, with different
-// predicted times. Neither the filter history nor its helper spaces/log counters
-// may be shared unsynchronised between these callers.
-static _Thread_local struct {
-    XrHandle view_session, view_space;
-    PFN_create_ref_space create_ref_space;
-    euro3 f;
-    int64_t last_xr_time;         // last filtered sample time
-    XrVector3f out_dir;           // filtered head-relative direction
-    int64_t last_valid_ms;
-    int have_out;
-    XrVector3f pending;           // large jump awaiting confirmation
-    int pending_n;
-    unsigned held, rejected;      // counters for the log
-} GZ;
-
-static int gaze_head(XrHandle base, int64_t time, XrPosef* head) {
-    XrHandle s = g_gaze_session;
-    if (!s) return 0;
-    if (!GZ.create_ref_space) {
-        GZ.create_ref_space = (PFN_create_ref_space)vdhs_resolve_mapped_symbol(kLoaderNeedle, "xrCreateReferenceSpace");
-        if (!GZ.create_ref_space) return 0;
-    }
-    if (GZ.view_session != s) {
-        PFN_create_ref_space create = GZ.create_ref_space;
-        memset(&GZ, 0, sizeof GZ);
-        GZ.create_ref_space = create;
-        XrRefSpaceCI ci;
-        memset(&ci, 0, sizeof ci);
-        ci.type = 37;                     // XR_TYPE_REFERENCE_SPACE_CREATE_INFO
-        ci.referenceSpaceType = 1;        // VIEW
-        ci.poseInReferenceSpace.orientation.w = 1.0f;
-        XrHandle sp = 0;
-        XrResult r = GZ.create_ref_space(s, &ci, &sp);
-        LOGI("gaze: VIEW space r=%d", r);
-        GZ.view_session = s;
-        GZ.view_space = r == 0 ? sp : 0;
-    }
-    if (!GZ.view_space) return 0;
-    XrSpaceLocation hl;
-    memset(&hl, 0, sizeof hl);
-    hl.type = 42;                         // XR_TYPE_SPACE_LOCATION
-    if (g_orig_locate_space(GZ.view_space, base, time, &hl) != 0 || (hl.locationFlags & 0x3) != 0x3) return 0;
-    *head = hl.pose;
-    return 1;
-}
-
-static int gaze_filter(XrHandle base, int64_t time, XrSpaceLocation* loc) {
-    XrPosef head;
-    if (!gaze_head(base, time, &head)) return 0;
-    int64_t t = now_ms();
-    int valid = (loc->locationFlags & 0x3) == 0x3;
-    XrVector3f d = { 0, 0, 0 };
-    if (valid) {
-        XrQuaternionf q = loc->pose.orientation;
-        float ql = sqrtf(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
-        if (ql < 0.9f || ql > 1.1f) valid = 0;
-        else d = gv_norm(gq_fwd(gq_mul(gq_conj(head.orientation), q)));   // head-relative
-        if (gv_dot(d, d) < 0.5f) valid = 0;
-    }
-    if (valid && GZ.have_out && time != GZ.last_xr_time) {
-        // First sample after a big jump (typical blink/lost-track artefact) is
-        // held back until the next sample agrees with it.
-        float jump = gv_angle_deg(d, GZ.out_dir);
-        if (jump > vdhs_hand_cfg("gaze_jump_deg")) {
-            if (GZ.pending_n == 0 || gv_angle_deg(d, GZ.pending) > 8.0f) {
-                GZ.pending = d; GZ.pending_n = 1; GZ.rejected++;
-                valid = 0;
-            } else {
-                GZ.pending_n = 0;
-                GZ.f.init = 0;   // confirmed saccade: jump without smoothing lag
-            }
-        } else {
-            GZ.pending_n = 0;
-        }
-    }
-    if (valid) {
-        if (time != GZ.last_xr_time) {
-            float dt = GZ.last_xr_time ? (float)((time - GZ.last_xr_time) / 1e9) : 0;
-            if (dt > 0.2f) GZ.f.init = 0;
-            GZ.out_dir = gv_norm(euro3_step(&GZ.f, d, dt, vdhs_hand_cfg("gaze_mincutoff"),
-                                             vdhs_hand_cfg("gaze_beta"), 1.0f));
-            GZ.last_xr_time = time;
-        }
-        GZ.have_out = 1;
-        GZ.last_valid_ms = t;
-    } else if (GZ.have_out && t - GZ.last_valid_ms <= (int64_t)vdhs_hand_cfg("gaze_hold_ms")) {
-        GZ.held++;
-    } else {
-        return 0;   // leave the runtime's (invalid) result
-    }
-    loc->pose.orientation = gq_mul(head.orientation, gq_from_fwd(GZ.out_dir));
-    if (!(loc->locationFlags & 0x3)) loc->pose.position = head.position;
-    loc->locationFlags |= 0xf;
-    return 1;
-}
-
-// Both callers use the SAME EyeGazeSpace/StageSpace pair on PICO:
-//   OpenXRHMD.Update -> TryGetEyeGazePose(useHeadSpace:false): world pointer
-//   OpenXRHMD.GetEyeState -> TryGetEyeGazePose(useHeadSpace:true): streaming
-// A thread ID, base space or timestamp cannot distinguish these uses (tracking
-// forwarding also calls GetEyeState on the render thread). Inspect only the
-// immediate managed consumer of TryGetEyeGazePose. Unknown call chains, including
-// a missing/inlined TryGetEyeGazePose frame, bypass BOTH filtering and
-// compensation. The supported VD build calls GetEyeState from Game, separately
-// from OpenXRHMD.Update; neither of those streaming callers is whitelisted.
-// Mono's public no-IL walker supports the app's AOT frames; no managed code is
-// patched and no managed object references are retained.
-enum { GAZE_CALLER_UNKNOWN, GAZE_CALLER_POINTER, GAZE_CALLER_HEAD };
-typedef int (*GazeStackWalk)(void*, int, int, int, void*);
-static struct {
-    void (*stack_walk_no_il)(GazeStackWalk, void*);
-    void* (*method_get_class)(void*);
-    const char* (*method_get_name)(void*);
-    void* (*class_get_image)(void*);
-    const char* (*class_get_name)(void*);
-    const char* (*class_get_namespace)(void*);
-    const char* (*image_get_name)(void*);
-    void* (*enter_gc_unsafe_region)(void**);
-    void (*exit_gc_unsafe_region)(void*, void**);
-} GM;
-static pthread_once_t g_gaze_mono_once = PTHREAD_ONCE_INIT;
-static int g_gaze_mono_ready;
-
-static void gaze_mono_init(void) {
-    static const char* const names[] = {
-        "mono_stack_walk_no_il", "mono_method_get_class", "mono_method_get_name",
-        "mono_class_get_image", "mono_class_get_name", "mono_class_get_namespace", "mono_image_get_name",
-        "mono_threads_enter_gc_unsafe_region", "mono_threads_exit_gc_unsafe_region",
-    };
-    _Static_assert(sizeof names / sizeof names[0] == sizeof GM / sizeof(void*), "GM slots vs names");
-    void** slots = (void**)&GM;
-    int ok = 1;
-    for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
-        slots[i] = vdhs_resolve_mapped_symbol("libmonosgen-2.0.so", names[i]);
-        if (!slots[i]) ok = 0;
-    }
-    g_gaze_mono_ready = ok;
-    LOGI("gaze: pointer caller guard %s", ok ? "ready" : "unavailable; filter and compensation disabled");
-}
-
-typedef struct { int frames, saw_query, caller; } GazeCallerWalk;
-static int gaze_caller_frame(void* method, int native_offset, int il_offset, int managed, void* user) {
-    GazeCallerWalk* w = (GazeCallerWalk*)user;
-    if (++w->frames > 12) return 1;
-    if (!managed) return 0;   // skip P/Invoke wrappers
-    if (!method) return 1;    // do not search through unknown managed frames
-    void* klass = GM.method_get_class(method);
-    void* image = klass ? GM.class_get_image(klass) : NULL;
-    const char* mn = GM.method_get_name(method);
-    const char* kn = klass ? GM.class_get_name(klass) : NULL;
-    const char* ns = klass ? GM.class_get_namespace(klass) : NULL;
-    const char* im = image ? GM.image_get_name(image) : NULL;
-    if (!mn || !kn || !ns || !im) return 1;
-
-    if (!w->saw_query && !strcmp(im, "Xenko.OpenXR") && !strcmp(ns, "Xenko.OpenXR") &&
-        !strcmp(kn, "Session") && !strcmp(mn, "TryGetEyeGazePose")) {
-        w->saw_query = 1;
-        return 0;
-    }
-    if (!strcmp(im, "Xenko.VR") && !strcmp(ns, "Xenko.VR") && !strcmp(kn, "OpenXRHMD")) {
-        if (!strcmp(mn, "GetEyeState")) w->caller = GAZE_CALLER_HEAD;
-        else if (w->saw_query && !strcmp(mn, "Update")) w->caller = GAZE_CALLER_POINTER;
-    }
-    // Never search past an unrecognised managed consumer for an older Update
-    // frame: that could misclassify a nested streaming request as a pointer.
-    return 1;
-}
-
-static int gaze_caller(void) {
-    pthread_once(&g_gaze_mono_once, gaze_mono_init);
-    if (!g_gaze_mono_ready) return GAZE_CALLER_UNKNOWN;
-    GazeCallerWalk w = { 0, 0, GAZE_CALLER_UNKNOWN };
-    // xrLocateSpace is entered through a P/Invoke: this thread is attached but
-    // GC-safe (STATE_BLOCKING). mono_stack_walk_no_il does NOT enter GC-unsafe
-    // mode itself. A cold AOT lookup can take a contended cooperative mutex;
-    // its GC-safe transition would otherwise abort with BLOCKING/DO_BLOCKING.
-    // Keep the stack marker alive across the walk, including its metadata
-    // callbacks, and restore the incoming state before returning to OpenXR.
-    void* stack_marker = NULL;
-    void* cookie = GM.enter_gc_unsafe_region(&stack_marker);
-    GM.stack_walk_no_il(gaze_caller_frame, &w);
-    GM.exit_gc_unsafe_region(cookie, &stack_marker);
-    return w.caller;
-}
-
-static const char* gaze_caller_name(int caller) {
-    static const char* const names[] = { "unknown", "pointer", "head-relative" };
-    return names[caller];
-}
-
-static void gaze_log_route(int caller, int filtered, int fixed) {
-    // Once per route/result on each thread, even when verbose gaze logs are off.
-    static _Thread_local unsigned reported;
-    unsigned bit = 1u << (caller * 4 + filtered * 2 + fixed);
-    if (reported & bit) return;
-    reported |= bit;
-    LOGI("gaze: caller=%s filter_applied=%d vd_fix_applied=%d", gaze_caller_name(caller), filtered, fixed);
-}
-
-// gaze_vd_fix (default 1), POINTER CALLS ONLY. On PICO VD computes
-// Pose.Multiply(locate(Gaze,Stage), locate(Stage,Head)) = head-relative gaze
-// (Session.cs:1446-1452) and uses it directly as a ray in its world
-// (CurrentSpace = LOCAL, TouchInjector.cs:288-290), which drops the head pose.
-// Returning X = head_in_stage ∘ T_local←stage ∘ gaze_stage makes VD's product
-// equal the LOCAL-space gaze.
-static XrPosef gpose_mul(XrPosef a, XrPosef b) {   // a ∘ b
-    XrPosef r;
-    r.orientation = gq_mul(a.orientation, b.orientation);
-    XrQuaternionf p = { b.position.x, b.position.y, b.position.z, 0 };
-    XrQuaternionf t = gq_mul(gq_mul(a.orientation, p), gq_conj(a.orientation));
-    r.position.x = a.position.x + t.x; r.position.y = a.position.y + t.y; r.position.z = a.position.z + t.z;
-    return r;
-}
-static _Thread_local XrHandle g_local_space, g_local_session;
-static int gaze_vd_fix(XrHandle base, int64_t time, XrSpaceLocation* loc) {
-    if ((loc->locationFlags & 0x3) != 0x3) return 0;
-    // VD's world is Session.CurrentSpace (LOCAL, or STAGE with StageTracking),
-    // taken from its projection layer. VD multiplies by head_from_stage in
-    // either case, so the head term is needed even when world == base.
-    XrHandle world = (XrHandle)vdhs_pt_current_space();
-    XrPosef head;
-    if (!gaze_head(base, time, &head)) return 0;
-    XrHandle s = g_gaze_session;
-    if (world == base) { loc->pose = gpose_mul(head, loc->pose); return 1; }
-    if (world) {
-        XrSpaceLocation sw;
-        memset(&sw, 0, sizeof sw);
-        sw.type = 42;
-        if (g_orig_locate_space(base, world, time, &sw) != 0 || (sw.locationFlags & 0x3) != 0x3) return 0;
-        loc->pose = gpose_mul(head, gpose_mul(sw.pose, loc->pose));
-        return 1;
-    }
-    if (g_local_session != s) {
-        XrRefSpaceCI ci;
-        memset(&ci, 0, sizeof ci);
-        ci.type = 37;
-        ci.referenceSpaceType = 2;   // LOCAL
-        ci.poseInReferenceSpace.orientation.w = 1.0f;
-        XrHandle sp = 0;
-        XrResult r = GZ.create_ref_space(s, &ci, &sp);
-        LOGI("gaze: LOCAL space r=%d", r);
-        g_local_session = s;
-        g_local_space = r == 0 ? sp : 0;
-    }
-    if (!g_local_space) return 0;
-    XrSpaceLocation sl;   // base (Stage) in LOCAL
-    memset(&sl, 0, sizeof sl);
-    sl.type = 42;
-    if (g_orig_locate_space(base, g_local_space, time, &sl) != 0 || (sl.locationFlags & 0x3) != 0x3) return 0;
-    loc->pose = gpose_mul(head, gpose_mul(sl.pose, loc->pose));
-    return 1;
-}
-
-// Pointer diagnostic only; this observes the filtered pose BEFORE compensation.
-// Streaming takes the early-return branch without these extra space queries.
-static void gaze_log_sample(XrHandle base, int64_t time, const XrSpaceLocation* loc, uint64_t raw_flags,
-                            XrQuaternionf raw_q) {
-    static _Thread_local int64_t last_ms;
-    static _Thread_local unsigned calls, invalid;
-    static _Thread_local XrQuaternionf last_raw, last_out;
-    static _Thread_local int64_t last_time;
-    calls++;
-    if ((raw_flags & 0x3) != 0x3) invalid++;
-    int64_t t = now_ms();
-    if (t - last_ms < 500) return;
-    const XrQuaternionf q = loc->pose.orientation;
-    float d1 = fabsf(raw_q.x * last_raw.x + raw_q.y * last_raw.y + raw_q.z * last_raw.z + raw_q.w * last_raw.w);
-    float d2 = fabsf(q.x * last_out.x + q.y * last_out.y + q.z * last_out.z + q.w * last_out.w);
-    XrVector3f f = gq_fwd(q);
-    // Upward-offset diagnosis: on PICO VD composes
-    // locate(Gaze,Stage) with locate(Stage,Head) (Session.cs:1446-1452) and
-    // casts the result as a world ray (TouchInjector.cs:288-290). Log the head
-    // forward and the forward VD ends up with, so the offset can be compared
-    // with head pitch offline. pitch = asin(fwd.y) in degrees.
-    XrPosef head;
-    float hp = NAN, gp = asinf(f.y > 1 ? 1 : f.y < -1 ? -1 : f.y) * 57.29578f, vp = NAN, rel = NAN;
-    XrVector3f vf = { NAN, NAN, NAN };
-    if (gaze_head(base, time, &head)) {
-        XrVector3f hf = gq_fwd(head.orientation);
-        hp = asinf(hf.y > 1 ? 1 : hf.y < -1 ? -1 : hf.y) * 57.29578f;
-        XrVector3f rf = gq_fwd(gq_mul(gq_conj(head.orientation), q));   // gaze relative to head
-        rel = asinf(rf.y > 1 ? 1 : rf.y < -1 ? -1 : rf.y) * 57.29578f;
-        XrSpaceLocation sv;
-        memset(&sv, 0, sizeof sv);
-        sv.type = 42;
-        if (g_orig_locate_space(base, GZ.view_space, time, &sv) == 0 && (sv.locationFlags & 0x1)) {
-            vf = gq_fwd(gq_mul(sv.pose.orientation, q));   // Pose.Multiply(gaze, stageInHead)
-            vp = asinf(vf.y > 1 ? 1 : vf.y < -1 ? -1 : vf.y) * 57.29578f;
-        }
-    }
-    LOGI("gaze: caller=pointer locate base=0x%llx raw_flags=0x%llx out_flags=0x%llx p=(%.3f,%.3f,%.3f) fwd=(%.3f,%.3f,%.3f) "
-         "dAng raw=%.1f out=%.1fdeg/%lldms dt_xr=%.1fms calls=%u invalid=%u held=%u rejected=%u "
-         "pitch gaze=%.1f head=%.1f rel=%.1f vd=%.1f vd_fwd=(%.3f,%.3f,%.3f)",
-         (unsigned long long)base, (unsigned long long)raw_flags, (unsigned long long)loc->locationFlags,
-         loc->pose.position.x, loc->pose.position.y, loc->pose.position.z, f.x, f.y, f.z,
-         2.0f * acosf(d1 > 1 ? 1 : d1) * 57.29578f, 2.0f * acosf(d2 > 1 ? 1 : d2) * 57.29578f,
-         (long long)(t - last_ms), (time - last_time) / 1e6, calls, invalid, GZ.held, GZ.rejected,
-         gp, hp, rel, vp, vf.x, vf.y, vf.z);
-    last_ms = t; last_raw = raw_q; last_out = q; last_time = time; calls = invalid = 0;
-    GZ.held = GZ.rejected = 0;
-}
-
-static XrResult hk_locate_space(XrHandle space, XrHandle base, int64_t time, XrSpaceLocation* loc) {
-    if (!vdhs_layer_active()) return g_orig_locate_space(space, base, time, loc);
-    XrResult r = g_orig_locate_space(space, base, time, loc);
-    if (!g_gaze_space || space != g_gaze_space || !loc || r != 0) return r;
-    static _Thread_local int enabled = -1, filter = -1, vdfix = -1;
-    if (enabled < 0) {
-        enabled = vdhs_hand_cfg("gaze_log") > 0;
-        filter = vdhs_hand_cfg("gaze_filter") > 0;
-        vdfix = vdhs_hand_cfg("gaze_vd_fix") > 0;
-        LOGI("gaze: log=%d filter=%d vd_fix=%d", enabled, filter, vdfix);
-    }
-    if (!enabled && !filter && !vdfix) return r;
-    // Classify before touching the pose or filter history. GetEyeState (including
-    // render-thread tracking forwarding) and unknown consumers keep the complete
-    // upstream location, including its original validity/tracking flags.
-    int caller = gaze_caller();
-    if (caller != GAZE_CALLER_POINTER) {
-        gaze_log_route(caller, 0, 0);
-        return r;
-    }
-    const uint64_t raw_flags = loc->locationFlags;
-    const XrQuaternionf raw_q = loc->pose.orientation;
-    int filtered = filter && gaze_filter(base, time, loc);
-    if (enabled) gaze_log_sample(base, time, loc, raw_flags, raw_q);
-    int fixed = vdfix && gaze_vd_fix(base, time, loc);
-    gaze_log_route(caller, filtered, fixed);
-    return r;
-}
-
 static XrResult hk_create_action(XrActionSet set, const XrActionCreateInfo* ci, XrAction* out) {
     if (!vdhs_layer_active()) return g_orig_create_action(set, ci, out);
     XrResult r = g_orig_create_action(set, ci, out);
-    if (r == 0 && ci && out && !strcmp(ci->actionName, "eye_gaze_pose")) {
-        g_gaze_action = *out;
-        LOGI("createAction: eye_gaze_pose=0x%llx", (unsigned long long)*out);
-    }
-    if (r == 0 && ci && out && !strcmp(ci->actionName, "grip_pose")) {
+    if (r == 0 && ci && out) {
         pthread_mutex_lock(&g_lock);
-        if (g_grip_n < MAX_GRIP) g_grip[g_grip_n++] = *out;
+        if (g_actions_n < MAX_ACTIONS) {
+            g_actions[g_actions_n].action = *out;
+            strncpy(g_actions[g_actions_n].name, ci->actionName, sizeof g_actions[0].name - 1);
+            g_actions[g_actions_n].name[sizeof g_actions[0].name - 1] = 0;
+            g_actions_n++;
+        }
+        if (!strcmp(ci->actionName, "grip_pose") && g_grip_n < MAX_GRIP)
+            g_grip[g_grip_n++] = *out;
         pthread_mutex_unlock(&g_lock);
-        LOGI("createAction: grip_pose=0x%llx", (unsigned long long)*out);
+        LOGI("createAction: '%s' type=%d -> 0x%llx", ci->actionName, (int)ci->actionType,
+             (unsigned long long)*out);
     }
     return r;
 }
@@ -1204,6 +928,114 @@ static int is_grip(XrAction a) {
     int n = g_grip_n;
     for (int i = 0; i < n; i++) if (g_grip[i] == a) return 1;
     return 0;
+}
+
+// ---------------------------------------------------------------- auto hand switch
+static int is_grip_space(XrSpace s) {
+    int n = g_grip_space_n;
+    for (int i = 0; i < n; i++) if (g_grip_space[i] == s) return 1;
+    return 0;
+}
+
+static XrResult hk_create_action_space(XrSession s, const XrActionSpaceCreateInfo* ci, XrSpace* out) {
+    if (!g_orig_create_action_space) return (XrResult)-1;
+    XrResult r = g_orig_create_action_space(s, ci, out);
+    const char* nm = ci ? action_name(ci->action) : "?";
+    LOGI("createActionSpace: action=0x%llx name='%s' r=%d out=0x%llx grip=%d",
+         (unsigned long long)(ci ? ci->action : 0), nm, r, (unsigned long long)(out ? *out : 0),
+         ci ? is_grip(ci->action) : 0);
+    if (r == 0 && ci && out) {
+        pthread_mutex_lock(&g_lock);
+        if (g_grip_space_n < MAX_GRIP) {
+            int slot = g_grip_space_n++;
+            g_grip_space[slot] = *out;
+            strncpy(g_grip_space_name[slot], nm, sizeof g_grip_space_name[0] - 1);
+            g_grip_space_name[slot][sizeof g_grip_space_name[0] - 1] = 0;
+            LOGI("createActionSpace: tracking space '%s' 0x%llx as controller candidate",
+                 g_grip_space_name[slot], (unsigned long long)*out);
+        }
+        pthread_mutex_unlock(&g_lock);
+    }
+    return r;
+}
+
+// Update the per-slot controller pose used by the auto-hand idle watcher.
+static void ctrl_note_slot(int slot, const XrSpaceLocation* loc, int64_t t) {
+    if (slot < 0 || !loc) return;
+    g_ctrl_last_seen_ms = t;
+    if (!(loc->locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)) return;
+    if (g_auto_move_cm <= 0) {
+        g_auto_move_cm = vdhs_hand_cfg("auto_hand_move_cm");
+        if (g_auto_move_cm <= 0) g_auto_move_cm = 2.0f;
+    }
+    float thr = g_auto_move_cm / 100.0f, thr2 = thr * thr;
+    float dx = loc->pose.position.x - g_ctrl[slot].x;
+    float dy = loc->pose.position.y - g_ctrl[slot].y;
+    float dz = loc->pose.position.z - g_ctrl[slot].z;
+    if (!g_ctrl[slot].have || dx*dx + dy*dy + dz*dz >= thr2) {
+        if (g_ctrl[slot].have && !g_ctrl[slot].move_logged) {
+            g_ctrl[slot].move_logged = 1;
+            LOGI("locateSpace: space '%s' moves -> controller candidate", g_grip_space_name[slot]);
+        }
+        g_ctrl[slot].x = loc->pose.position.x;
+        g_ctrl[slot].y = loc->pose.position.y;
+        g_ctrl[slot].z = loc->pose.position.z;
+        g_ctrl[slot].have = 1;
+        g_ctrl_last_move_ms = t;
+    }
+}
+
+static int ctrl_slot_of(XrSpace s) {
+    int n = g_grip_space_n;
+    for (int i = 0; i < n; i++) if (g_grip_space[i] == s) return i;
+    return -1;
+}
+
+static XrResult hk_locate_space(XrSpace space, XrSpace base, XrTime time, XrSpaceLocation* loc) {
+    if (!g_orig_locate_space) return (XrResult)-1;
+    XrResult r = g_orig_locate_space(space, base, time, loc);
+    if (r == 0 && loc && is_grip_space(space)) {
+        static int logged;
+        if (!logged) { logged = 1; LOGI("locateSpace: controller space located (auto-hand tracking active)"); }
+        if (!g_ref_base && base) g_ref_base = base;   // remember a base for our own polls
+        ctrl_note_slot(ctrl_slot_of(space), loc, now_ms());
+    }
+    if (time > g_pred_time) g_pred_time = time;       // fallback clock for our own polls
+    return r;
+}
+
+// Per-frame poll of the controller action spaces. VD stops calling xrLocateSpace
+// on them once it shows hands, so we locate them ourselves with the last frame's
+// predicted time; this keeps the pick-up detection alive in hand mode.
+static void ctrl_poll(void) {
+    static int64_t last_log;
+    int64_t t = now_ms();
+    if (g_grip_space_n > 0 && g_ctrl_last_seen_ms == 0 && (t - last_log >= 5000)) {
+        last_log = t;
+        LOGI("ctrlPoll: waiting (base=%d time=%d n=%d orig=%d)",
+             g_ref_base != 0, g_pred_time != 0, (int)g_grip_space_n, g_orig_locate_space != 0);
+    }
+    if (!g_orig_locate_space || !g_ref_base || g_pred_time == 0 || g_grip_space_n <= 0) return;
+    if (t - last_log < 50) return;
+    last_log = t;
+    XrSpaceLocation loc;
+    int valid = 0, rc0 = -9999;
+    for (int i = 0; i < g_grip_space_n; i++) {
+        memset(&loc, 0, sizeof loc);
+        loc.type = 42;                 // XR_TYPE_SPACE_LOCATION
+        loc.next = NULL;
+        XrResult lr = g_orig_locate_space(g_grip_space[i], g_ref_base, (XrTime)g_pred_time, &loc);
+        if (i == 0) rc0 = (int)lr;
+        if (lr == 0)
+            ctrl_note_slot(i, &loc, t);
+        if (loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) valid++;
+    }
+    static int64_t last_report; static int reported;
+    if (!reported || t - last_report >= 5000) {
+        reported = 1; last_report = t;
+        LOGI("ctrlPoll: %d/%d spaces valid rc0=%d, moved %lldms ago",
+             valid, (int)g_grip_space_n, rc0, (long long)(t - g_ctrl_last_move_ms));
+    }
 }
 
 // PICO active input device, 0=HMD 1=controller 2=hand; cached ~20 ms.
@@ -1219,22 +1051,98 @@ static int active_input_cached(void) {
     last_ms = t;
     if (!resolved) {
         // Through VD's loader: it forwards to the runtime for enabled
-        // extensions and stays valid across runtime reloads.
-        XrResult r = g_orig_gipa(inst, "xrGetActiveInputDeviceTypePico", (PFN_xrVoidFunction*)&fn);
-        resolved = (r == 0 && fn) ? 1 : -1;
-        LOGI("activeInput: resolve r=%d fn=%p", r, (void*)fn);
+        // extensions and stays valid across runtime reloads. The exported name
+        // differs across PICO OS builds (PICO 4 / 5.13.7 exposes the vendor
+        // Pxr_ name, not the OpenXR-spelled one), so try the known spellings.
+        static const char* const names[] = {
+            "xrGetActiveInputDeviceTypePico",
+            "Pxr_GetActiveInputDeviceType",
+            "xrGetActiveInputTypePICO",
+            "Pxr_GetHandTrackerActiveInputType",
+        };
+        XrResult r = -7;   // XR_ERROR_FUNCTION_UNSUPPORTED
+        for (size_t i = 0; i < sizeof names / sizeof names[0] && !fn; i++) {
+            PFN_active_input f = NULL;
+            r = g_orig_gipa(inst, names[i], (PFN_xrVoidFunction*)&f);
+            if (r == 0 && f) { fn = f; LOGI("activeInput: resolved via %s", names[i]); }
+        }
+        resolved = fn ? 1 : -1;
+        LOGI("activeInput: resolve r=%d fn=%p%s", r, (void*)fn,
+             fn ? "" : " (using pvr.active.input_device property)");
     }
-    if (resolved < 0) return last_val = -11;
+    if (resolved < 0) {
+        // No OpenXR active-input proc on this runtime: read the property the
+        // PICO input reader maintains. Keep the last known value if it is
+        // unavailable (e.g. SELinux denied the read).
+        int v = vdhs_hand_active_input();
+        if (v >= 0 && v != last_val) LOGI("activeInput: prop %d -> %d", last_val, v);
+        return last_val = (v >= 0 ? v : last_val);
+    }
     uint32_t v = 0xffffffffu;
-    if (fn(inst, &v) != 0) return last_val = -12;
+    if (fn(inst, &v) != 0) return last_val;
     if ((int)v != last_val) LOGI("activeInput: %d -> %u", last_val, v);
     return last_val = (int)v;
+}
+
+// 1 = present the input as hands (mask the grip pose). PICO publishes its own
+// decision as pvr.active.input_device (2 = hands, 1 = controller, other/-1 =
+// undecided), but a resting controller keeps PICO on "controller" forever, so
+// its value is only a hint. The real signal is our own xrLocateSpace poll of the
+// controller (aim_pose) spaces: still for auto_hand_idle_ms means it was set
+// down -> hands; any fresh movement means it was picked up -> controller.
+static int effective_hand_mode(void) {
+    int p = active_input_cached();
+    static int prev_p = -2;
+    int pico_hands = (p == 2);
+    if (p == 1 && prev_p != 1) {                       // PICO just handed control back
+        g_ctrl_last_move_ms = now_ms();                // treat as controller activity
+        if (g_auto_hand_logged) { g_auto_hand_logged = 0; LOGI("autoHand: PICO -> controller"); }
+    }
+    prev_p = p;
+    if (vdhs_hand_cfg("auto_hand") <= 0) return pico_hands;
+    int64_t seen = g_ctrl_last_seen_ms;
+    if (!seen) return pico_hands;                     // never observed a controller: follow PICO
+    int64_t last = g_ctrl_last_move_ms ? g_ctrl_last_move_ms : seen;
+    int64_t idle = now_ms() - last;
+    float cfg = vdhs_hand_cfg("auto_hand_idle_ms");
+    int64_t idle_ms = cfg > 0 ? (int64_t)cfg : 2000;
+    if (idle < idle_ms) {
+        if (g_auto_hand_logged) { g_auto_hand_logged = 0; LOGI("autoHand: controller moved -> controller (idle=%lldms)", (long long)idle); }
+        return 0;
+    }
+    if (vdhs_hand_cfg("auto_hand_visible") > 0) {
+        vdhs_pt_joint tmp[32];
+        if (vdhs_pt_hand_snapshot(1, tmp, 32) <= 0 && vdhs_pt_hand_snapshot(2, tmp, 32) <= 0) return 0;
+    }
+    if (!g_auto_hand_logged) { g_auto_hand_logged = 1; LOGI("autoHand: controller idle %lldms -> hands", (long long)idle); }
+    return 1;
+}
+
+static XrResult hk_get_bool(XrSession s, const XrActionStateGetInfo* gi, XrActionStateBoolean* st) {
+    if (!vdhs_layer_active() || !g_orig_get_bool) return g_orig_get_bool ? g_orig_get_bool(s, gi, st) : (XrResult)-1;
+    XrResult r = g_orig_get_bool(s, gi, st);
+    if (r == 0 && gi && st && st->currentState) ctrl_input_seen(action_name(gi->action));
+    return r;
+}
+
+static XrResult hk_get_float(XrSession s, const XrActionStateGetInfo* gi, XrActionStateFloat* st) {
+    if (!vdhs_layer_active() || !g_orig_get_float) return g_orig_get_float ? g_orig_get_float(s, gi, st) : (XrResult)-1;
+    XrResult r = g_orig_get_float(s, gi, st);
+    if (r == 0 && gi && st && st->currentState > 0.4f) ctrl_input_seen(action_name(gi->action));
+    return r;
+}
+
+static XrResult hk_get_vec2(XrSession s, const XrActionStateGetInfo* gi, XrActionStateVector2f* st) {
+    if (!vdhs_layer_active() || !g_orig_get_vec2) return g_orig_get_vec2 ? g_orig_get_vec2(s, gi, st) : (XrResult)-1;
+    XrResult r = g_orig_get_vec2(s, gi, st);
+    if (r == 0 && gi && st && st->x * st->x + st->y * st->y > 0.36f) ctrl_input_seen(action_name(gi->action));
+    return r;
 }
 
 static XrResult hk_get_pose(XrSession s, const XrActionStateGetInfo* gi, XrActionStatePose* st) {
     if (!vdhs_layer_active()) return g_orig_get_pose(s, gi, st);
     XrResult r = g_orig_get_pose(s, gi, st);
-    if (r == 0 && gi && st && st->isActive && is_grip(gi->action) && active_input_cached() == 2)
+    if (r == 0 && gi && st && st->isActive && is_grip(gi->action) && effective_hand_mode())
         st->isActive = 0;
     return r;
 }
@@ -1250,6 +1158,21 @@ static int loader_mapped_cb(struct dl_phdr_info* info, size_t size, void* data) 
 
 typedef struct { const char* name; void* hook; void** orig; uintptr_t expect_off; } hook_spec;
 
+// Best-effort hook: a missing export or a failed hook only disables that
+// feature, it never rolls the core group back.
+static void install_optional_hook(uintptr_t base, const char* name, void* hook, void** orig) {
+    void* a = vdhs_resolve_mapped_symbol(kLoaderNeedle, name);
+    if (!a) { LOGE("install: %s not in .dynsym (auto-hand switch disabled)", name); return; }
+    void* stub = shadowhook_hook_func_addr(a, hook, orig);
+    if (!stub) {
+        int e = shadowhook_get_errno();
+        LOGE("install: hook %s failed: %d %s (auto-hand switch disabled)", name, e, shadowhook_to_errmsg(e));
+        *orig = NULL;
+        return;
+    }
+    LOGI("install: %s @ +0x%lx (auto-hand)", name, (unsigned long)((uintptr_t)a - base));
+}
+
 static int install_hooks(uintptr_t base) {
     hook_spec specs[] = {
         { "xrEnumerateInstanceExtensionProperties", (void*)hk_enum,            (void**)&g_orig_enum,            0x385f4 },
@@ -1260,8 +1183,6 @@ static int install_hooks(uintptr_t base) {
         { "xrGetSystemProperties",                  (void*)hk_get_system_props, (void**)&g_orig_get_system_props, 0x54058 },
         { "xrEndFrame",                             (void*)hk_end_frame,       (void**)&g_orig_end_frame,       0 },
         { "xrPollEvent",                            (void*)hk_poll_event,      (void**)&g_orig_poll_event,      0 },
-        { "xrCreateActionSpace",                    (void*)hk_create_action_space, (void**)&g_orig_create_action_space, 0 },
-        { "xrLocateSpace",                          (void*)hk_locate_space,    (void**)&g_orig_locate_space,    0 },
     };
     enum { N = (int)(sizeof specs / sizeof specs[0]) };
     void* addr[N];
@@ -1287,9 +1208,58 @@ static int install_hooks(uintptr_t base) {
             return -2;
         }
     }
+    install_optional_hook(base, "xrCreateActionSpace", (void*)hk_create_action_space, (void**)&g_orig_create_action_space);
+    install_optional_hook(base, "xrLocateSpace", (void*)hk_locate_space, (void**)&g_orig_locate_space);
+    install_optional_hook(base, "xrGetActionStateBoolean", (void*)hk_get_bool, (void**)&g_orig_get_bool);
+    install_optional_hook(base, "xrGetActionStateFloat", (void*)hk_get_float, (void**)&g_orig_get_float);
+    install_optional_hook(base, "xrGetActionStateVector2f", (void*)hk_get_vec2, (void**)&g_orig_get_vec2);
+    install_optional_hook(base, "xrWaitFrame", (void*)hk_wait_frame, (void**)&g_orig_wait_frame);
     if (vdhs_pt_install(base) != 0) LOGE("install: alpha-hole hooks disabled");
     __atomic_store_n(&g_hooks_ok, 1, __ATOMIC_RELEASE);
     return 0;
+}
+
+// PICO's OpenXR hand-tracking SDK calls xrSetAppHandTrackingEnabledPico(true) so
+// the system knows the app owns hand input and turns off its hand-gesture
+// shortcuts (recenter / open dock). VD uses generic OpenXR and never calls it,
+// so those gestures keep firing. We call it on VD's behalf. Non-fatal: any
+// failure just leaves the system gestures on.
+typedef XrResult (*PFN_set_app_hands)(XrInstance, uint32_t enabled);
+static PFN_set_app_hands g_pfn_set_app_hands;
+
+static void pico_app_hands_once(void) {
+    static int done;
+    static int tries;
+    static int64_t last;
+    if (done) return;
+    if (vdhs_hand_cfg("pico_app_hands") <= 0) { done = 1; return; }
+    XrInstance inst = g_instance;
+    if (!inst || !g_orig_gipa) return;
+    int64_t t = now_ms();
+    if (t - last < 500) return;
+    last = t;
+    if (!g_pfn_set_app_hands) {
+        PFN_xrVoidFunction f = NULL;
+        // Prefer the runtime's own proc table (obtained via negotiate): VD's
+        // loader rejects PICO extensions we have not been able to mark, while
+        // the runtime gates on the API class mark instead.
+        PFN_gipa rg = (PFN_gipa)vdhs_runtime_gipa();
+        XrResult rr = rg ? rg(inst, "xrSetAppHandTrackingEnabledPico", &f) : -1;
+        if ((rr != 0 || !f) && g_orig_gipa)
+            rr = g_orig_gipa(inst, "xrSetAppHandTrackingEnabledPico", &f);
+        if (rr != 0 || !f) {
+            if (++tries >= 6) { done = 1; LOGI("picoAppHands: xrSetAppHandTrackingEnabledPico r=%d (unavailable)", rr); }
+            return;
+        }
+        g_pfn_set_app_hands = (PFN_set_app_hands)f;
+        LOGI("picoAppHands: resolved xrSetAppHandTrackingEnabledPico");
+    }
+    XrResult rc = g_pfn_set_app_hands(inst, 1);
+    if (tries == 0 || rc == 0) LOGI("picoAppHands: xrSetAppHandTrackingEnabledPico(1) -> %d", rc);
+    if (rc == 0 || ++tries > 20) {
+        if (rc != 0) LOGI("picoAppHands: giving up (rc=%d)", rc);
+        done = 1;
+    }
 }
 
 static void* layer_thread(void* arg) {

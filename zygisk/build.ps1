@@ -9,6 +9,8 @@
 # Magisk ABI directory):
 #   zygisk/zygisk/arm64-v8a.so          Zygisk injector
 #   zygisk/payload/libvdhs.so           shared native payload
+#   zygisk/payload/libvdhs_rt.so        runtime-process gesture suppressor
+#   zygisk/payload/libvdhs_shell.so     shell-process gesture suppressor
 #   zygisk/payload/VdHsMod.dll          managed mod
 #   zygisk/payload/backend.txt          backend selection
 #   zygisk/payload/hand_mesh_fb.bin     bundled mesh, installed on first app launch
@@ -88,14 +90,24 @@ New-Item -ItemType Directory -Force -Path $OutZygisk, $OutPayload | Out-Null
 
 Copy-Item (Join-Path $ModBuild 'arm64-v8a.so')    (Join-Path $OutZygisk 'arm64-v8a.so') -Force
 Copy-Item (Join-Path $NativeBuild 'libvdhs.so')   (Join-Path $OutPayload 'libvdhs.so') -Force
+Copy-Item (Join-Path $NativeBuild 'libvdhs_rt.so') (Join-Path $OutPayload 'libvdhs_rt.so') -Force
+Copy-Item (Join-Path $NativeBuild 'libvdhs_shell.so') (Join-Path $OutPayload 'libvdhs_shell.so') -Force
 Copy-Item (Join-Path $ReleaseDir 'VdHsMod.dll')   (Join-Path $OutPayload 'VdHsMod.dll') -Force
 Copy-Item -LiteralPath $HandMesh -Destination (Join-Path $OutPayload 'hand_mesh_fb.bin') -Force
 
 if ($Harmony) {
-    $net35 = Join-Path $env:USERPROFILE '.nuget\packages\lib.harmony\2.3.5\lib\net35\0Harmony.dll'
-    if (-not (Test-Path $net35)) { throw "Harmony package not restored: $net35 (run the -Harmony build once online)" }
-    Copy-Item $net35 (Join-Path $OutPayload '0Harmony.dll') -Force
-    Write-Host "  staged 0Harmony.dll (net35)"
+    # Prefer an assembly the device's Mono can resolve. The net35 build binds
+    # mscorlib 2.0.0.0, which Virtual Desktop's runtime does not ship
+    # (TypeLoadException: System.Version in mscorlib, Version=2.0.0.0).
+    # netstandard2.0 / net472 bind mscorlib 4.0.0.0 and load.
+    $tfm = $null
+    foreach ($candidate in 'netstandard2.0', 'net472', 'net35') {
+        $p = Join-Path $env:USERPROFILE ".nuget\packages\lib.harmony\2.3.5\lib\$candidate\0Harmony.dll"
+        if (Test-Path $p) { $tfm = $candidate; break }
+    }
+    if (-not $tfm) { throw "Harmony package not restored (run the -Harmony build once online)" }
+    Copy-Item (Join-Path $env:USERPROFILE ".nuget\packages\lib.harmony\2.3.5\lib\$tfm\0Harmony.dll") (Join-Path $OutPayload '0Harmony.dll') -Force
+    Write-Host "  staged 0Harmony.dll ($tfm)"
 } else {
     Remove-Item (Join-Path $OutPayload '0Harmony.dll') -ErrorAction SilentlyContinue
 }
@@ -127,7 +139,23 @@ if ($Pack) {
     }
     Copy-Item $OutZygisk (Join-Path $stage 'zygisk') -Recurse -Force
     Copy-Item $OutPayload (Join-Path $stage 'payload') -Recurse -Force
-    Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -Force
+    # Pack with forward-slash entry names. Windows PowerShell 5.1's
+    # Compress-Archive writes backslash separators, which Android's unzip
+    # treats as literal filename characters (no payload/ or zygisk/ dirs).
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zipFs = [System.IO.File]::Open($zip, [System.IO.FileMode]::Create)
+    $archive = New-Object System.IO.Compression.ZipArchive($zipFs, [System.IO.Compression.ZipArchiveMode]::Create)
+    $baseLen = $stage.Length + 1
+    Get-ChildItem -Recurse -File $stage | ForEach-Object {
+        $rel = $_.FullName.Substring($baseLen).Replace('\', '/')
+        $entry = $archive.CreateEntry($rel, [System.IO.Compression.CompressionLevel]::Optimal)
+        $es = $entry.Open()
+        $fs = [System.IO.File]::OpenRead($_.FullName)
+        $fs.CopyTo($es)
+        $fs.Dispose(); $es.Dispose()
+    }
+    $archive.Dispose(); $zipFs.Dispose()
     Remove-Item -Recurse -Force $stage
     Write-Host "packed: $zip"
 }

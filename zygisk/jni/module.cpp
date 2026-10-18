@@ -30,6 +30,18 @@
 // Observed from the untouched official APK (Virtual Desktop_1.34.22.0.apk).
 static const char* kTargetProcess = "VirtualDesktop.Android";
 
+// PICO's out-of-process OpenXR runtime service. It owns the system hand-gesture
+// relay, so a second, much smaller payload is injected here to keep the system
+// gestures off while Virtual Desktop runs (see mod/native/vdhs_rt.c).
+static const char* kRuntimeProcess = "com.pico.xr.openxr_runtime";
+
+// The system shell. It is the component that actually performs the gestures, and
+// it only skips them for packages on its own hardcoded list, so a third payload
+// is injected here too (see mod/native/vdhs_shell.c).
+static const char* kShellProcess = "com.picoxr.xrshell";
+
+enum Target { TARGET_VD, TARGET_RUNTIME, TARGET_SHELL };
+
 // Files staged from <module>/payload/<name> into <app_data_dir>/vdhs/<basename>.
 // Absent optional entries are removed from the stage so backend/config defaults
 // cannot be overridden by a previous installation. The install-if-missing mesh
@@ -52,8 +64,23 @@ static StagedFile g_files[] = {
 };
 static const int g_fileCount = (int)(sizeof(g_files) / sizeof(g_files[0]));
 
+// The runtime process only needs its own single payload.
+static StagedFile g_runtime_files[] = {
+    {"payload/libvdhs_rt.so", true, -1, false},
+};
+static const int g_runtimeFileCount = (int)(sizeof(g_runtime_files) / sizeof(g_runtime_files[0]));
+
+// The shell process only needs its own single payload.
+static StagedFile g_shell_files[] = {
+    {"payload/libvdhs_shell.so", true, -1, false},
+};
+static const int g_shellFileCount = (int)(sizeof(g_shell_files) / sizeof(g_shell_files[0]));
+
 static bool g_target = false;
+static Target g_which = TARGET_VD;
 static bool g_sources_ok = false;
+static StagedFile* g_active = g_files;
+static int g_activeCount = g_fileCount;
 
 static const char* base_name(const char* path) {
     const char* slash = strrchr(path, '/');
@@ -94,9 +121,9 @@ static bool copy_fd_to_file(int fd, const char* dst) {
 }
 
 static void close_staged_fds() {
-    for (int i = 0; i < g_fileCount; i++) {
-        if (g_files[i].fd >= 0) close(g_files[i].fd);
-        g_files[i].fd = -1;
+    for (int i = 0; i < g_activeCount; i++) {
+        if (g_active[i].fd >= 0) close(g_active[i].fd);
+        g_active[i].fd = -1;
     }
 }
 
@@ -113,49 +140,57 @@ public:
         if (!args || !args->nice_name) return;
 
         const char* name = env_->GetStringUTFChars(args->nice_name, nullptr);
-        bool match = name && strcmp(name, kTargetProcess) == 0;
+        bool is_runtime = name && strcmp(name, kRuntimeProcess) == 0;
+        bool is_shell = name && strcmp(name, kShellProcess) == 0;
+        bool is_vd = name && strcmp(name, kTargetProcess) == 0;
         if (name) env_->ReleaseStringUTFChars(args->nice_name, name);
-        if (!match) return;
+        if (!is_vd && !is_runtime && !is_shell) return;
+
+        g_which = is_runtime ? TARGET_RUNTIME : (is_shell ? TARGET_SHELL : TARGET_VD);
+        g_active = is_runtime ? g_runtime_files : (is_shell ? g_shell_files : g_files);
+        g_activeCount = is_runtime ? g_runtimeFileCount
+                                   : (is_shell ? g_shellFileCount : g_fileCount);
 
         g_target = true;
-        LOGI("preAppSpecialize: target process %s", kTargetProcess);
+        LOGI("preAppSpecialize: target process %s",
+             is_runtime ? kRuntimeProcess : (is_shell ? kShellProcess : kTargetProcess));
 
         int dir = api_->getModuleDir();
         if (dir < 0) { LOGE("getModuleDir failed"); return; }
 
         g_sources_ok = true;
-        for (int i = 0; i < g_fileCount; i++) {
-            int fd = openat(dir, g_files[i].name, O_RDONLY | O_CLOEXEC);
+        for (int i = 0; i < g_activeCount; i++) {
+            int fd = openat(dir, g_active[i].name, O_RDONLY | O_CLOEXEC);
             if (fd < 0) {
-                if (errno == ENOENT && !g_files[i].required) {
-                    LOGI("stage: optional %s not present", g_files[i].name);
+                if (errno == ENOENT && !g_active[i].required) {
+                    LOGI("stage: optional %s not present", g_active[i].name);
                 } else {
-                    LOGE("stage open %s: %s", g_files[i].name, strerror(errno));
+                    LOGE("stage open %s: %s", g_active[i].name, strerror(errno));
                     g_sources_ok = false;
                 }
                 continue;
             }
             struct stat st;
             if (fstat(fd, &st) != 0) {
-                LOGE("stage stat %s: %s", g_files[i].name, strerror(errno));
+                LOGE("stage stat %s: %s", g_active[i].name, strerror(errno));
                 close(fd);
                 g_sources_ok = false;
                 continue;
             }
-            if (!S_ISREG(st.st_mode) || (g_files[i].required && st.st_size == 0)) {
-                LOGE("stage: invalid payload file %s", g_files[i].name);
+            if (!S_ISREG(st.st_mode) || (g_active[i].required && st.st_size == 0)) {
+                LOGE("stage: invalid payload file %s", g_active[i].name);
                 close(fd);
                 g_sources_ok = false;
                 continue;
             }
             if (!api_->exemptFd(fd)) {
-                LOGE("stage: exemptFd failed for %s", g_files[i].name);
+                LOGE("stage: exemptFd failed for %s", g_active[i].name);
                 close(fd);
                 g_sources_ok = false;
                 continue;
             }
-            g_files[i].fd = fd;
-            LOGI("stage: %s -> fd %d", g_files[i].name, fd);
+            g_active[i].fd = fd;
+            LOGI("stage: %s -> fd %d", g_active[i].name, fd);
         }
         close(dir);
     }
@@ -196,10 +231,10 @@ public:
 
         int staged = 0;
         bool stage_ok = true;
-        for (int i = 0; i < g_fileCount; i++) {
+        for (int i = 0; i < g_activeCount; i++) {
             char dst[1200];
-            snprintf(dst, sizeof dst, "%s/%s", dir, base_name(g_files[i].name));
-            if (g_files[i].install_if_missing) {
+            snprintf(dst, sizeof dst, "%s/%s", dir, base_name(g_active[i].name));
+            if (g_active[i].install_if_missing) {
                 // Install the bundled mesh on first launch; keep a user's own mesh on upgrade.
                 struct stat st;
                 if (lstat(dst, &st) == 0) {
@@ -217,13 +252,13 @@ public:
                     break;
                 }
             }
-            if (g_files[i].fd < 0) {
+            if (g_active[i].fd < 0) {
                 if (unlink(dst) != 0 && errno != ENOENT) {
                     LOGE("stage remove %s: %s", dst, strerror(errno));
                     stage_ok = false;
                     break;
                 }
-            } else if (copy_fd_to_file(g_files[i].fd, dst)) {
+            } else if (copy_fd_to_file(g_active[i].fd, dst)) {
                 staged++;
             } else {
                 LOGE("stage write %s: %s", dst, strerror(errno));
@@ -235,14 +270,18 @@ public:
         if (!stage_ok) { LOGE("payload staging failed; injection skipped"); return; }
         LOGI("postAppSpecialize: staged %d file(s) into %s", staged, dir);
 
+        const char* payloadName = g_which == TARGET_RUNTIME ? "libvdhs_rt.so"
+                                : (g_which == TARGET_SHELL ? "libvdhs_shell.so" : "libvdhs.so");
+        const char* entryName = g_which == TARGET_RUNTIME ? "vdhs_rt_main"
+                              : (g_which == TARGET_SHELL ? "vdhs_shell_main" : "vdhs_payload_main");
         char payload[1200];
-        snprintf(payload, sizeof payload, "%s/libvdhs.so", dir);
+        snprintf(payload, sizeof payload, "%s/%s", dir, payloadName);
         void* handle = dlopen(payload, RTLD_NOW | RTLD_GLOBAL);
         if (!handle) { LOGE("dlopen %s failed: %s", payload, dlerror()); return; }
 
         typedef int (*PayloadMain)(void*, int);
-        PayloadMain entry = (PayloadMain)dlsym(handle, "vdhs_payload_main");
-        if (!entry) { LOGE("vdhs_payload_main not found in payload"); return; }
+        PayloadMain entry = (PayloadMain)dlsym(handle, entryName);
+        if (!entry) { LOGE("%s not found in payload", entryName); return; }
 
         JavaVM* vm = nullptr;
         env_->GetJavaVM(&vm);
@@ -261,3 +300,4 @@ private:
 };
 
 REGISTER_ZYGISK_MODULE(VdHsModule)
+

@@ -29,6 +29,7 @@
 #include <link.h>   // ElfW
 
 #include "vdhs_layer.h"
+#include "vdhs_sym.h"
 
 #define TAG "vdhs-zygisk"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -84,118 +85,6 @@ static char* read_file(const char* path, long* out_len) {
     if (got != (size_t)len) { free(buf); return NULL; }
     *out_len = len;
     return buf;
-}
-
-// Find an already-mapped shared library by substring in /proc/self/maps and
-// return its load base (first file-offset-0 readable mapping) plus its path.
-// /proc/self/maps lists every mapping in the process regardless of linker
-// namespace, which dlopen()/dl_iterate_phdr (caller namespace only) do not.
-static int find_mapped_base(const char* needle, uintptr_t* out_base, char* path, size_t cap) {
-    FILE* f = fopen("/proc/self/maps", "r");
-    if (!f) return 0;
-    char line[512];
-    int found = 0;
-    while (fgets(line, sizeof line, f)) {
-        if (!strstr(line, needle)) continue;
-        unsigned long start = 0, end = 0, off = 0;
-        char perms[8] = {0};
-        if (sscanf(line, "%lx-%lx %7s %lx", &start, &end, perms, &off) != 4) continue;
-        if (off != 0 || perms[0] != 'r') continue;
-        *out_base = (uintptr_t)start;
-        char* slash = strrchr(line, '/');
-        if (slash) {
-            size_t n = strlen(slash);
-            while (n > 0 && (slash[n - 1] == '\n' || slash[n - 1] == '\r')) n--;
-            if (n > 0 && n < cap) { memcpy(path, slash, n); path[n] = '\0'; }
-        }
-        found = 1;
-        break;
-    }
-    fclose(f);
-    return found;
-}
-
-// Symbol count from a SysV or GNU hash table (both give a tight upper bound on
-// .dynsym entries). Used because .dynsym has no explicit length in ELF.
-static size_t gnu_symcount(const uint32_t* gh) {
-    const uint32_t nbuckets = gh[0];
-    const uint32_t symoffset = gh[1];
-    const uint32_t bloom_size = gh[2];
-    const uint32_t* buckets = gh + 4 + bloom_size * (uint32_t)(sizeof(uintptr_t) / 4);
-    if (nbuckets == 0) return symoffset;
-    uint32_t last = 0;
-    for (uint32_t i = 0; i < nbuckets; i++) if (buckets[i] > last) last = buckets[i];
-    if (last < symoffset) return symoffset;
-    const uint32_t* chain = buckets + nbuckets;   // chain[k] belongs to symbol symoffset+k
-    uint32_t idx = last;
-    while (!(chain[idx - symoffset] & 1u)) idx++;
-    return (size_t)idx + 1;
-}
-
-// Resolve dynamic symbols of an already-mapped library by walking its in-memory
-// ELF. This sidesteps the linker namespace entirely: the app's Mono lives in
-// the classloader namespace, but its mapped pages are ordinary readable memory
-// for our (default-namespace) payload.
-static int resolve_mapped_symbols(const char* needle, const char* const* names,
-                                  void** out, int count) {
-    uintptr_t base = 0;
-    char path[512] = {0};
-    if (!find_mapped_base(needle, &base, path, sizeof path)) return 0;
-
-    const ElfW(Ehdr)* eh = (const ElfW(Ehdr)*)base;
-    if (eh->e_ident[EI_MAG0] != ELFMAG0 || eh->e_ident[EI_MAG1] != ELFMAG1) return 0;
-    if (eh->e_phoff == 0 || eh->e_phnum == 0) return 0;
-
-    const ElfW(Phdr)* ph = (const ElfW(Phdr)*)(base + eh->e_phoff);
-    const ElfW(Dyn)* dyn = NULL;
-    for (int i = 0; i < eh->e_phnum; i++) {
-        if (ph[i].p_type == PT_DYNAMIC) { dyn = (const ElfW(Dyn)*)(base + ph[i].p_vaddr); break; }
-    }
-    if (!dyn) return 0;
-
-    const ElfW(Sym)* symtab = NULL;
-    const char* strtab = NULL;
-    const uint32_t* gnu = NULL;
-    const uint32_t* hash = NULL;
-    for (const ElfW(Dyn)* d = dyn; d->d_tag != DT_NULL; d++) {
-        switch (d->d_tag) {
-            case DT_SYMTAB:   symtab = (const ElfW(Sym)*)(base + d->d_un.d_ptr); break;
-            case DT_STRTAB:   strtab = (const char*)(base + d->d_un.d_ptr); break;
-            case DT_GNU_HASH: gnu = (const uint32_t*)(base + d->d_un.d_ptr); break;
-            case DT_HASH:     hash = (const uint32_t*)(base + d->d_un.d_ptr); break;
-            default: break;
-        }
-    }
-    if (!symtab || !strtab) return 0;
-
-    size_t nsyms = 0;
-    if (gnu) nsyms = gnu_symcount(gnu);
-    else if (hash) nsyms = (size_t)hash[1];
-    if (nsyms == 0) return 0;
-
-    int got = 0;
-    for (int j = 0; j < count; j++) {
-        if (out[j]) { got++; continue; }
-        for (size_t i = 0; i < nsyms; i++) {
-            const char* nm = strtab + symtab[i].st_name;
-            if (strcmp(nm, names[j]) == 0) {
-                out[j] = (void*)(base + symtab[i].st_value);
-                got++;
-                break;
-            }
-        }
-    }
-    return got;
-}
-
-// Single-symbol variant, exported for vdhs_mark.c (weak reference there, so
-// a build without this file still links).
-__attribute__((visibility("default")))
-void* vdhs_resolve_mapped_symbol(const char* lib, const char* name) {
-    const char* names[1] = { name };
-    void* out[1] = { NULL };
-    if (resolve_mapped_symbols(lib, names, out, 1) <= 0) return NULL;
-    return out[0];
 }
 
 static void dirname_of(const char* path, char* out, size_t cap) {
@@ -329,7 +218,7 @@ static void* mono_waiter(void* arg) {
     int resolved = 0;
     for (int i = 0; i < 600 && !resolved; i++) {
         memset(syms, 0, sizeof syms);
-        if (resolve_mapped_symbols(kMonoLib, kSyms, syms, kSymCount) > 0 && syms[0]) resolved = 1;
+        if (vdhs_resolve_mapped_symbols(kMonoLib, kSyms, syms, kSymCount) > 0 && syms[0]) resolved = 1;
         else usleep(100 * 1000);
     }
     if (!resolved) { LOGE("payload: %s not mapped after 60s", kMonoLib); return NULL; }

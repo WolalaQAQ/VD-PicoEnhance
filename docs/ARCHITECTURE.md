@@ -13,24 +13,37 @@ module.
 
 ```
 Magisk / Zygisk
-   └─ zygisk/arm64-v8a.so            injector, matches VirtualDesktop.Android
+   └─ zygisk/arm64-v8a.so            injector, three matched processes
          └─ stages payload/ into <app_data>/vdhs/ at pre-app-specialize
-         └─ dlopen(libvdhs.so) -> vdhs_payload_main()
-               ├─ libvdhs.so          native OpenXR compatibility layer
-               │     ├─ vdhs_layer.c  inline hooks on VD's bundled libopenxr_loader.so
-               │     ├─ vdhs_hand.c   hand tracking, aim/mesh, managed extension list
-               │     ├─ vdhs_pt.c     zero-copy hand-passthrough hole
-               │     └─ vdhs_mark.c   xrMarkApiClass reach-through (PICO runtime)
-               └─ VdHsMod.dll         managed mod (netstandard2.0, reflection only)
-                     └─ VdHsMod.Loader.Start()
+         │
+         ├─ VirtualDesktop.Android
+         │     └─ dlopen(libvdhs.so) -> vdhs_payload_main()
+         │           ├─ libvdhs.so          native OpenXR compatibility layer
+         │           │     ├─ vdhs_layer.c  inline hooks on VD's bundled libopenxr_loader.so
+         │           │     ├─ vdhs_hand.c   hand tracking, aim/mesh, managed extension list
+         │           │     ├─ vdhs_pt.c     zero-copy hand-passthrough hole
+         │           │     └─ vdhs_mark.c   xrMarkApiClass reach-through (PICO runtime)
+         │           └─ VdHsMod.dll         managed mod (netstandard2.0, reflection only)
+         │                 └─ VdHsMod.Loader.Start()
+         │
+         ├─ com.pico.xr.openxr_runtime
+         │     └─ dlopen(libvdhs_rt.so)    -> vdhs_rt_main()
+         │           └─ vdhs_rt.c          clears the gesture state the runtime relays
+         │
+         └─ com.picoxr.xrshell
+               └─ dlopen(libvdhs_shell.so) -> vdhs_shell_main()
+                     └─ vdhs_shell.c       makes the shell skip gestures for VD
 ```
 
-- `zygisk/jni/module.cpp` is the injector. It targets the real package name
-  `VirtualDesktop.Android`, exempts the payload fds across app specialization,
-  copies the payload into the app's private data dir and calls the native entry
-  point. The bundled hand mesh is installed only when missing, preserving a
-  user's custom mesh. No C++ STL is used (Zygisk requires `APP_STL=none`).
-- `mod/native/` builds a single shared payload, `libvdhs.so`.
+- `zygisk/jni/module.cpp` is the injector. It matches the real package names
+  `VirtualDesktop.Android`, `com.pico.xr.openxr_runtime` and `com.picoxr.xrshell`,
+  exempts the payload fds across app specialization, copies the payload into the
+  app's private data dir and calls the matching native entry point. The bundled
+  hand mesh is installed only when missing, preserving a user's custom mesh. No
+  C++ STL is used (Zygisk requires `APP_STL=none`).
+- `mod/native/` builds three payloads: `libvdhs.so` (Virtual Desktop),
+  `libvdhs_rt.so` (the OpenXR runtime process) and `libvdhs_shell.so` (the system
+  shell). They share `vdhs_sym.c`, the in-memory ELF resolver.
 - `mod/src/VdHsMod/` is loader-agnostic C#: it holds **zero compile-time
   reference** to any Virtual Desktop / Xenko / Mono.Android assembly. Everything
   it touches is resolved by name through reflection.
@@ -95,6 +108,11 @@ Without a usable blob, the mesh extension is not advertised. See
 
 ## 3. Eye gaze
 
+> **Removed in this PICO 4 (A8110) fork.** The plain PICO 4 has no eye-tracking
+> hardware, so the gaze hooks, filtering, compensation and the `gaze_*` settings
+> described below were deleted from the native layer and the managed mod. The
+> text is kept for upstream reference only.
+
 The layer's additional One-Euro smoothing, jump confirmation and invalid-sample
 hold (`gaze_filter`) apply only to the UI pointer. `gaze_vd_fix` pre-compensates
 the head pose that Virtual Desktop drops for that pointer. Both settings default
@@ -149,6 +167,21 @@ chosen at runtime (no rebuild) through `payload/backend.txt` / `VDHS_BACKEND`:
 None of these backends modify the installed APK; `redirect` only loads an
 assembly you already produced for your own device.
 
+The optional Harmony backend (`build.ps1 -Harmony`) is selected when `auto`
+finds no patched DLL but `Lib.Harmony` is available; it patches
+`IsControllerActive` in place. Stage a **Mono-compatible** `0Harmony.dll`: the
+package's `net35` build binds `mscorlib, Version=2.0.0.0`, which the headset's
+Mono does not ship (`TypeLoadException: System.Version`) and the backend silently
+falls back to `dataonly`. Use the `netstandard2.0`/`net472` build instead (the
+packer now prefers those).
+
+> **PICO 4 (A8110) note.** The stock PICO runtime exports no active-input-device
+> query (every spelling returns `XR_ERROR_FUNCTION_UNSUPPORTED`), so the layer
+> falls back to the `pvr.active.input_device` system property (`2` = hands) and
+> masks the grip pose's `isActive`. That native path alone makes VD render hands,
+> so `auto`/`dataonly` is sufficient — the Harmony `IsControllerActive` patch is
+> **not** required on this device.
+
 ## 5. Configuration and rollback
 
 - `payload/mode.txt` (and `VDHS_MODE`): `1` = injection smoke test only
@@ -164,7 +197,45 @@ still follows VD's own settings (`pt_follow_settings=1`). Diagnostic switches
 (`gaze_log`, `hj_diag_ms`, `pt_alpha_only`, `pt_style`) default off. Existing explicit
 configuration values take precedence; the module never rewrites that file.
 
-## 6. Robustness contract
+## 6. System hand-gesture suppression
+
+The recenter and open-dock gestures are not the app's: the platform tracking
+service recognises them, and the system shell (`com.picoxr.xrshell`) performs
+them. Nothing inside Virtual Desktop can stop that, so two companion payloads
+run outside it.
+
+**Shell (`libvdhs_shell.so`).** This is the mechanism PICO's own streaming app
+relies on. `libxrshell.so` keeps
+
+```
+std::vector<std::string> gDisableSystemGesturesPackageNames
+bool                     gApplicationDisableSystemGestures
+InputManager::updateAppDisableSystemGestures(pkg, XrServerDisplayState, bool isSelf)
+```
+
+The vector is built in a static initialiser and holds exactly one hardcoded
+entry, `com.picovr.picostreamassistant`; `updateAppDisableSystemGestures()` is
+called once per frame with the focused package, compares it against that list and
+drives the flag, which the gesture handling reads. The payload hooks the function
+(by name — the library keeps its full symbol table), answers the check for
+`VirtualDesktop.Android` itself and skips the original for that package, so the
+flag is stable and the shell's own list is untouched. Scoping is therefore free:
+the flag follows the focused app, so gestures return as soon as VD is not it. On
+startup it also logs the list it read back, which is how the layout is verified
+on a new firmware.
+
+**Runtime (`libvdhs_rt.so`).** PICO's out-of-process OpenXR runtime relays the
+platform's gesture state to every session, the shell included. While VD owns the
+MR service (`sys.pxr.mrserivce.user`) the payload clears that state, hooking
+`InputDeviceManager::service_status_callback` and, once the library is mapped,
+the runtime's own emitter for `XR_DEVICE_SYSTEMGESTURE_STATE` (found through the
+log string it prints, since the runtime libraries are mapped straight out of
+`XRRuntime.apk`). This is a second layer rather than the primary fix.
+
+Both payloads only report; they never write to the app or to system files, and
+they stop mattering the moment VD is no longer focused.
+
+## 7. Robustness contract
 
 The mod must never take down the host process. `VdHsMod.Loader.Start()` is fully
 guarded: every step degrades to a no-op on failure, and the native payload does
@@ -178,7 +249,7 @@ partial installation cannot enable alpha-hole drawing or its layer flags.
 Once native-layer initialization starts, the managed payload and input probe
 leave runtime negotiation to VD-thread hooks, including after installation fails.
 
-## 7. Scope and limitations
+## 8. Scope and limitations
 
 - Target: PICO 4 Pro, arm64, Virtual Desktop Android 1.34.22.0. Internal
   layout/names are version-specific; a Virtual Desktop update can break the
