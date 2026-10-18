@@ -11,7 +11,7 @@ Streaming PCVR games is only possible on a VR Ready PC running Windows 10 or 11	
 Exit SteamVR	退出 SteamVR
 Launch SteamVR	启动 SteamVR
 Exit Game	退出游戏
-Quit	退出
+Quit	退出	spread=2
 Virtual Desktop servers unreachable, only showing local computers	无法连接 Virtual Desktop 服务器，仅显示本地电脑
 Input Options	输入选项
 Gamepad	游戏手柄
@@ -38,10 +38,10 @@ Video Bitrate	视频码率
 COMPUTERS	电脑
 ENVIRONMENTS	环境
 GAMES	游戏
-INPUT	输入
-SETTINGS	设置
+INPUT	输入	pad=30,vpad=1
+SETTINGS	设置	pad=30,vpad=1
 STREAMING	串流
-VIDEOS	视频
+VIDEOS	视频	pad=30,vpad=1
 Switch to Desktop	切换到桌面
 Switch to VR	切换到 VR
 Controllers interact with desktop	手柄与桌面交互
@@ -154,7 +154,7 @@ Environment	环境
 Hands	手
 Desk Portal	桌面传送门
 Show boundary	显示边界
-Videos	视频
+Videos	视频	pad=30,vpad=1
 Ascending	升序
 Descending	降序
 Show Hidden Items	显示隐藏项

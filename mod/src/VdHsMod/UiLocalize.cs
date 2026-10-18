@@ -23,6 +23,7 @@ namespace VdHsMod
     {
         private static bool _started;
         private static Dictionary<string, string> _table;
+        private static readonly Dictionary<string, string> _styles = new Dictionary<string, string>();
         private static object _font;
 
         internal static void Start()
@@ -59,7 +60,19 @@ namespace VdHsMod
                 if (line.Length == 0 || line[0] == '#') continue;
                 var tab = line.IndexOf('\t');
                 if (tab <= 0) continue;
-                table[line.Substring(0, tab)] = line.Substring(tab + 1);
+
+                // A third field is an optional style for the few labels that sit
+                // on top of text they replaced: pad=N trailing spaces, spread=N
+                // spaces between characters, size=X multiplies the font size.
+                var key = line.Substring(0, tab);
+                var rest = line.Substring(tab + 1);
+                var tab2 = rest.IndexOf('\t');
+                if (tab2 >= 0)
+                {
+                    _styles[key] = rest.Substring(tab2 + 1);
+                    rest = rest.Substring(0, tab2);
+                }
+                table[key] = rest;
             }
             return table;
         }
@@ -149,7 +162,7 @@ namespace VdHsMod
                     string zh;
                     if (_table.TryGetValue(text, out zh))
                     {
-                        Translate(node, "Text", zh, font);
+                        Translate(node, "Text", zh, font, StyleOf(text));
                         translated++;
                     }
                 }
@@ -160,9 +173,16 @@ namespace VdHsMod
                 string zhContent;
                 if (content != null && _table.TryGetValue(content, out zhContent))
                 {
-                    Translate(node, "Content", zhContent, font);
+                    Translate(node, "Content", zhContent, font, StyleOf(content));
                     translated++;
                 }
+
+                // A content control's Content is not part of Children, so a label
+                // kept in a Content TextBlock would otherwise be walked straight
+                // past and left in its original language, which is what put
+                // English underneath the translated button labels.
+                var contentObject = GestureToggle.Get(node, "Content");
+                if (contentObject != null && !(contentObject is string)) queue.Enqueue(contentObject);
 
                 GestureToggle.EnqueueChildren(queue, node, "Children");
                 GestureToggle.EnqueueChildren(queue, node, "VisualChildren");
@@ -171,37 +191,6 @@ namespace VdHsMod
             if (translated > 0)
             {
                 ModLog.Info("ui_zh: translated " + translated + " labels (font=" + (font != null) + ")");
-                if (font != null) DescribeFont(font);
-            }
-        }
-
-        /// <summary>
-        /// Reports which of a probe string's characters the font can actually
-        /// draw, so we know whether the atlas simply lacks them.
-        /// </summary>
-        private static void DescribeFont(object font)
-        {
-            try
-            {
-                const string probe = "屏蔽系统手势设置";
-                var isPresent = font.GetType().GetMethod("IsCharPresent");
-                if (isPresent == null)
-                {
-                    ModLog.Info("ui_zh: font " + font.GetType().Name + " has no IsCharPresent");
-                    return;
-                }
-                var missing = new System.Text.StringBuilder();
-                foreach (var c in probe)
-                {
-                    var present = (bool)isPresent.Invoke(font, new object[] { c });
-                    if (!present) missing.Append(c);
-                }
-                ModLog.Info("ui_zh: font " + font.GetType().Name + " missing chars: " +
-                            (missing.Length == 0 ? "(none)" : missing.ToString()));
-            }
-            catch (Exception ex)
-            {
-                ModLog.Error("ui_zh: DescribeFont: " + ex.Message);
             }
         }
 
@@ -211,13 +200,75 @@ namespace VdHsMod
         /// the CJK font, and forces a re-layout so the previous text stops being
         /// drawn underneath.
         /// </summary>
-        private static void Translate(object node, string member, string value, object font)
+        private static void Translate(object node, string member, string value, object font, string style)
         {
             if (font != null) GestureToggle.TrySet(node, "Font", font);
-            GestureToggle.TrySet(node, member, value);
+            // Clearing first forces the text renderer to throw away the glyphs it
+            // built for the previous string; assigning straight over the top can
+            // leave them on screen underneath the new text.
+            GestureToggle.TrySet(node, member, string.Empty);
+            GestureToggle.TrySet(node, member, Decorate(value, style));
+            // A styled label is one that sits on top of the text it replaced, so
+            // it also gets an opaque background to hide what is underneath.
+            if (style != null) Cover(node);
             ApplyFontToChildren(node, font, 0);
-            Invalidate(node);
-            Invalidate(GestureToggle.Get(node, "VisualParent"));
+        }
+
+        private static string StyleOf(string key)
+        {
+            string style;
+            return _styles.TryGetValue(key, out style) ? style : null;
+        }
+
+        /// <summary>
+        /// Some labels are drawn on top of the text they replaced, so they need a
+        /// wider box to hide it: pad adds trailing spaces, spread puts spaces
+        /// between the characters (which keeps a short label centred).
+        /// </summary>
+        private static string Decorate(string value, string style)
+        {
+            if (string.IsNullOrEmpty(style)) return value;
+
+            var result = value;
+
+            var spread = Field(style, "spread=");
+            if (spread > 0)
+            {
+                var builder = new System.Text.StringBuilder();
+                for (int i = 0; i < value.Length; i++)
+                {
+                    builder.Append(value[i]);
+                    if (i < value.Length - 1) builder.Append(new string(' ', (int)spread));
+                }
+                result = builder.ToString();
+            }
+
+            var pad = Field(style, "pad=");
+            if (pad > 0) result += new string(' ', (int)pad);
+
+            // vpad=N adds N blank lines above and below, which makes the label
+            // taller without touching the pre-baked glyph size.
+            var vpad = Field(style, "vpad=");
+            if (vpad > 0)
+            {
+                var blank = new string('\n', (int)vpad);
+                result = blank + result + blank;
+            }
+
+            return result;
+        }
+
+        private static float Field(string style, string name)
+        {
+            var at = style.IndexOf(name, StringComparison.OrdinalIgnoreCase);
+            if (at < 0) return 0;
+            var start = at + name.Length;
+            var end = start;
+            while (end < style.Length && (char.IsDigit(style[end]) || style[end] == '.')) end++;
+            float parsed;
+            return float.TryParse(style.Substring(start, end - start),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out parsed) ? parsed : 0;
         }
 
         private static void ApplyFontToChildren(object node, object font, int depth)
@@ -239,25 +290,15 @@ namespace VdHsMod
             }
         }
 
-        private static void Invalidate(object node)
+        private static void Cover(object node)
         {
-            if (node == null) return;
-            // Xenko declares these protected internal, so they need the non-public
-            // binding flags; without them the calls silently do nothing and the
-            // previous text keeps being drawn underneath.
-            foreach (var name in new[] { "InvalidateMeasure", "InvalidateArrange", "InvalidateVisual" })
+            try
             {
-                try
-                {
-                    var method = node.GetType().GetMethod(name,
-                        System.Reflection.BindingFlags.Instance |
-                        System.Reflection.BindingFlags.Public |
-                        System.Reflection.BindingFlags.NonPublic,
-                        null, Type.EmptyTypes, null);
-                    method?.Invoke(node, null);
-                }
-                catch { }
+                var parent = GestureToggle.Get(node, "VisualParent");
+                var background = parent == null ? null : GestureToggle.Get(parent, "BackgroundColor");
+                if (background != null) GestureToggle.TrySet(node, "BackgroundColor", background);
             }
+            catch { }
         }
 
         private static string PayloadDir()
