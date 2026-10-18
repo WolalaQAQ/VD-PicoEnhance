@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/system_properties.h>
 #include <unistd.h>
 #include <android/log.h>
 
@@ -24,6 +25,8 @@ static const char* kFlag = "gApplicationDisableSystemGestures";
 static const char* kList = "gDisableSystemGesturesPackageNames";
 static const char* kVd = "VirtualDesktop.Android";
 static const char* kKnown = "com.picovr.picostreamassistant";
+// Mirrored from VD's Input-tab switch by the module's service.sh.
+static const char* kSwitchProperty = "vdhs.system_gestures";
 
 typedef void (*PFN_update)(void*, const char*, const void*, int);
 static PFN_update g_original;
@@ -34,6 +37,16 @@ static void hook_update(void* self, const char* package, const void* state, int 
         // The original rechecks its whitelist every frame. Only override VD's
         // decision; all other packages retain the complete original path.
         unsigned char disabled = state ? (unsigned char)vdhs_shell_disable_for_vd(*(const int*)state, is_self) : 0;
+
+        // Live switch: the module mirrors VD's own Input-tab checkbox into this
+        // property, so the user can turn suppression off without a reboot. An
+        // empty or missing value keeps the decision above.
+        char flag[PROP_VALUE_MAX] = {0};
+        if (__system_property_get(kSwitchProperty, flag) > 0) {
+            if (flag[0] == '0') disabled = 0;
+            else if (flag[0] == '1') disabled = 1;
+        }
+
         if (*g_disabled != disabled) {
             *g_disabled = disabled;
             LOGI("system gestures %s for VD", disabled ? "suppressed" : "restored");

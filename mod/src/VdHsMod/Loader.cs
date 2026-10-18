@@ -46,6 +46,9 @@ namespace VdHsMod
                 ModLog.Info("backend install " + (ok ? "succeeded" : "FAILED (host left untouched)"));
 
                 InstanceProbe.Start();
+
+                // 3) Optional: add the gesture-suppression row to VD's Input tab.
+                GestureToggle.Start();
             }
             catch (Exception ex)
             {
