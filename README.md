@@ -126,7 +126,7 @@ In full mode, a background mirror checks the saved UI state once a second and wr
 
 When enabled, a separate Shell payload attempts to apply PICO's own streaming-app gesture-disable rule to focused VD, suppressing recenter/dock gestures. Other packages retain the original path. It does not inject into the OpenXR runtime service or change the global hand-tracking switch.
 
-Unchecking the UI restores system gestures and keeps the checkbox available. Reboot once after installing this revision to load the Shell receiver. Disabling the entire Magisk module or selecting smoke-test mode `1` also requires a reboot to unload the receiver. This single-switch revision still needs a headset gesture round-trip test.
+Unchecking the UI restores system gestures and keeps the checkbox available. Reboot once after installing this revision to load the Shell receiver. Disabling the entire Magisk module or selecting smoke-test mode `1` also requires a reboot to unload the receiver.
 
 ### Chinese UI (optional)
 
@@ -136,7 +136,7 @@ The module's `payload/ui_zh.txt` contains two-column translations as `English<TA
 
 Computer/game/file names, folder paths, network names, accounts, clocks and live values retain their original text even when they match a dictionary entry. Overlay frame rates, latencies, bitrates, resolutions, GPU/codec/runtime names and original units are also unchanged. Fixed card captions such as "Disconnect" and "Local file" are handled separately.
 
-The initialization worker exits when finished. VD's text-change events update button and performance states synchronously on the UI thread; only background callbacks are queued, avoiding an extra frame for ordinary quality changes. New clones inherit translated templates, and mod-created switches are localized directly. Recreating the page releases old listeners and initializes the replacement. There is no recurring tree scan or label-check loop. Headset confirmation of fonts, layout and interaction is still pending for this candidate.
+The initialization worker exits when finished. VD's text-change events update button and performance states synchronously on the UI thread; only background callbacks are queued, avoiding an extra frame for ordinary quality changes. New clones inherit translated templates, and mod-created switches are localized directly. Recreating the page releases old listeners and initializes the replacement. There is no recurring tree scan or label-check loop.
 
 Repeated UI-thread captions that produce the same translation and font do not request another full-panel redraw. Actual changes and background updates that may have exposed English still use a full redraw; this does not disable VD's normal layout or dirty-control processing.
 
