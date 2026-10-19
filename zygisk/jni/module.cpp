@@ -11,6 +11,7 @@
 // No C++ STL is used (the Zygisk sample requires APP_STL=none); only libc.
 #include <sys/types.h>   // dev_t / ino_t used by zygisk.hpp before it includes them
 #include "zygisk.hpp"
+#include "vd_capability.h"
 #include "vdhs_module_config.h"
 
 #include <android/log.h>
@@ -126,6 +127,16 @@ public:
     void onLoad(zygisk::Api* api, JNIEnv* env) override {
         api_ = api;
         env_ = env;
+    }
+
+    void preServerSpecialize(zygisk::ServerSpecializeArgs*) override {
+        int directory = api_->getModuleDir();
+        vd_capability_prepare(directory);
+        if (directory >= 0) close(directory);
+    }
+
+    void postServerSpecialize(const zygisk::ServerSpecializeArgs*) override {
+        vd_capability_start(env_);
     }
 
     void preAppSpecialize(zygisk::AppSpecializeArgs* args) override {

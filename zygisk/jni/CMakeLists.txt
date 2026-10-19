@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.22)
 project(vdhs_zygisk LANGUAGES CXX)
 
-add_library(vdhs_zygisk SHARED module.cpp)
+add_library(vdhs_zygisk SHARED module.cpp vd_capability.cpp)
 set_target_properties(vdhs_zygisk PROPERTIES
     OUTPUT_NAME "arm64-v8a"
     PREFIX "")

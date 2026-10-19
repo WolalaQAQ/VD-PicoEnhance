@@ -22,7 +22,8 @@ VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时向 Virtual Desktop 
 | 手追扩展 | 让 Virtual Desktop 看到 `XR_EXT_hand_tracking`，并把该扩展注入应用的托管扩展列表 | 始终开启 |
 | `XR_FB_hand_tracking_aim` | 层内合成捏合、菜单手势与指向射线；runtime 自身 aim 有效时优先使用 | `aim_*`、`pinch_*`、`menu_*` |
 | `XR_FB_hand_tracking_mesh` | 用 `hand_mesh_fb.bin` 提供手部网格（模块内置，也可用你自己头显的资源生成） | 文件存在即启用 |
-| 手/手柄热切换 | 放下手柄切到手，拿起手柄切回 | — |
+| PICO 原生手柄／手追切换 | 放下 PICO 手柄切到手，拿起手柄切回 | — |
+| 手势模式启动 VD | 在已支持固件上向系统声明 VD 的手追能力 | 完整模式自动启用 |
 | 手部透视（Virtual Desktop 内） | 每只手一个独立的 projected 层；未绘制时恢复背景透视 | `pt_split`、`pt_bg_fix` |
 | 手部透视（SteamVR） | 在 Virtual Desktop 串流画面的 swapchain 上原地改 alpha，只在手的位置开孔；不拷贝、不加层 | `pt_hole`、`pt_follow_settings` |
 | 冻结门控 | runtime 关节数据长时间不更新时，把这只手报告为不活跃，缓解手势"亮一下就消失" | `hj_freeze_ms`（默认 300 ms） |
@@ -39,7 +40,7 @@ SteamVR 里开孔的条件与 Virtual Desktop 自身的 `PassthroughPortals` 逻
 | 头显 | **PICO 4 Pro**，arm64-v8a |
 | Root | Magisk，且**已开启 Zygisk**（Zygisk API v5，即 Magisk ≥ 27000） |
 | Virtual Desktop | Android 版 `VirtualDesktop.Android` **1.34.22.0**，未修改 |
-| PC（仅构建用） | Windows + PowerShell、Android **NDK 26.1.10909125**、**CMake 3.22.1**、.NET SDK |
+| PC（仅构建用） | Windows + PowerShell、Android **NDK 26.1.10909125**、**CMake 3.22.1**、**platform 35**、**build-tools 35.0.0**、**JDK 17**、.NET SDK |
 
 其他 Virtual Desktop 版本尚未验证。兼容层通过应用内存中的符号与 PICO runtime 的解析接口工作，但内部方法名与版本相关。
 
@@ -56,6 +57,7 @@ Zygisk 模块匹配 Virtual Desktop 进程，把原生载荷 `libvdhs.so` 与托
 | `mod/native/` | VD 载荷 `libvdhs.so`、可选 Shell 载荷 `libvdhs_shell.so`、追踪能力策略和共用已映射符号解析器；内置 `third_party/shadowhook-2.0.1/` |
 | `mod/src/VdHsMod/` | 托管 mod（netstandard2.0，全程反射，不引用 Virtual Desktop 程序集） |
 | `zygisk/` | Magisk/Zygisk 模块：注入器 `jni/`、`payload/`（`mode.txt`、`backend.txt`）、`build.ps1` |
+| `coldstart/` | VD 专属系统包能力声明 helper 与构建脚本 |
 | `tools/mesh/` | 把头显自己的 PICO 手部 mesh 转成 `hand_mesh_fb.bin` |
 | `assets/mesh/` | Release 附带的手部 mesh blob，含来源说明与免责声明 |
 | `config/` | 含全部运行时开关的 `hand_gesture.txt` 示例 |
@@ -63,7 +65,7 @@ Zygisk 模块匹配 Virtual Desktop 进程，把原生载荷 `libvdhs.so` 与托
 
 ## 构建
 
-把 `ANDROID_SDK_ROOT`（或 `ANDROID_HOME`）指向装有 NDK 26.1.10909125 与 CMake 3.22.1 的 Android SDK，也可以把 SDK 路径写进不纳入版本控制的 `tools/sdk-path.txt`。然后：
+把 `ANDROID_SDK_ROOT`（或 `ANDROID_HOME`）指向装有 NDK 26.1.10909125、CMake 3.22.1、platform 35 和 build-tools 35.0.0 的 Android SDK，也可以把 SDK 路径写进不纳入版本控制的 `tools/sdk-path.txt`。将 `JAVA_HOME` 指向 JDK 17，或把路径写入不纳入版本控制的 `tools/jdk-path.txt`。然后：
 
 ```powershell
 # 原生载荷 + 托管 mod + Zygisk 注入器，stage 到 zygisk/payload/
@@ -98,13 +100,21 @@ powershell -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
 
 升级时，使用新版整合包重新运行安装脚本，安装完整模块并重启头显。
 
-> PICO 处于手势模式时会阻止 Virtual Desktop 冷启动。先拿起手柄，等 `getprop sys.pxr.trackingservice.gesturemode` 变成 `0`，再启动 Virtual Desktop。
+> 在已支持的 PICO 固件上，完整模式会向系统声明 VD 支持手追，让它可以在系统手势模式下启动。详见下方启动支持说明，无需修改 APK。
 
 ## 配置
 
 默认使用无需配置文件。需要调整功能时，可将 [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) 中的相应条目写入设备上的 `/data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt`。每个键都是可选的，缺省时沿用内置默认值；示例列出了可配置的键与建议值。
 
 SteamVR 手部透视开孔默认开启（`pt_hole=1`），并跟随 VD 的“VR 手部透视”开关。界面眼动平滑和头部补偿默认开启；已有配置中的显式设置优先于默认值。保存配置后重启 VD 生效。
+
+### 系统手势模式下启动 VD
+
+在 PICO 4 Pro／PICO OS 5.13.7 上，完整模式默认在系统内存中的包元数据里为 VD 补充整数 `handtracking=1`，让系统原有的启动检查识别 VD 支持手追。官方 APK、签名、其他应用和全局手追设置均不变。helper 仅匹配已验证的 Android 10 固件指纹，其他固件保持原状。
+
+安装后重启一次。以 root 执行 `sh /data/adb/modules/vdhs_zygisk/coldstart.sh status` 与 `sh /data/adb/modules/vdhs_zygisk/coldstart.sh query`：前者需显示 `applied` 或 `native` 且为 `int1 ok`，独立查询需显示 `metadata-query int1 ok`，再测试手势模式冷启动。VD 更新后，helper 会重新检查包对象。
+
+排查问题时，可用 `coldstart.sh disable` 恢复本 helper 补入的声明并保存停用选择，`enable` 重新启用；升级保留已有显式选择。烟雾测试模式 `1` 不加载此 helper，切换模式或禁用整个模块后需重启。它与输入页的手势屏蔽开关是两项功能：这里只解决系统允许启动 VD，不屏蔽系统手势，也不负责指虎与手追切换。
 
 ### 系统手势屏蔽（实验性，默认关闭）
 

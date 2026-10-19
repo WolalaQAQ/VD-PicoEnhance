@@ -35,8 +35,8 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
 
-      - name: Install pinned NDK and CMake
-        run: sdkmanager "ndk;26.1.10909125" "cmake;3.22.1"
+      - name: Install pinned Android build inputs
+        run: sdkmanager "ndk;26.1.10909125" "cmake;3.22.1" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Verify version
         run: |
@@ -50,7 +50,10 @@ jobs:
           "MODULE_VERSION=$version" >> $env:GITHUB_ENV
 
       - name: Build hook and module
-        run: pwsh -NoProfile -File zygisk/build.ps1 -Pack
+        run: |
+          if (-not $env:JAVA_HOME_17_X64) { throw 'Hosted JDK 17 is required.' }
+          $env:JAVA_HOME = $env:JAVA_HOME_17_X64
+          pwsh -NoProfile -File zygisk/build.ps1 -Pack
 
       - name: Prepare release assets
         run: |

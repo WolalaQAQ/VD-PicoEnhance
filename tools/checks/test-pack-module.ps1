@@ -54,6 +54,7 @@ function Assert-Fails([scriptblock]$Action, [string]$MessagePattern) {
 try {
     $baseEntries = @(
         'module.prop', 'customize.sh', 'post-fs-data.sh', 'service.sh',
+        'coldstart.sh', 'uninstall.sh', 'capability/classes.dex', 'capability/control.jar',
         'zygisk/arm64-v8a.so', 'payload/libvdhs.so', 'payload/VdHsMod.dll',
         'payload/mode.txt', 'payload/backend.txt', 'payload/hand_mesh_fb.bin'
     )

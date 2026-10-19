@@ -56,6 +56,8 @@ $NativeSrc   = Join-Path $RepoRoot 'mod\native'
 $NativeBuild = Join-Path $NativeSrc 'build-arm64'
 $ModSrc      = Join-Path $ModuleRoot 'jni'
 $ModBuild    = Join-Path $ModSrc 'build-arm64'
+$CapabilitySrc = Join-Path $RepoRoot 'coldstart'
+$OutCapability = Join-Path $ModuleRoot 'capability'
 $OutZygisk   = Join-Path $ModuleRoot 'zygisk'
 $OutPayload  = Join-Path $ModuleRoot 'payload'
 $HandMesh    = Join-Path $RepoRoot 'assets\mesh\hand_mesh_fb.bin'
@@ -82,11 +84,14 @@ Build-CMake $NativeSrc $NativeBuild
 
 Write-Host '== 3/4 arm64-v8a.so (Zygisk module) =='
 Build-CMake $ModSrc $ModBuild
+& (Join-Path $CapabilitySrc 'build.ps1') -SdkRoot $SdkRoot
 
 Write-Host '== 4/4 stage module tree =='
-New-Item -ItemType Directory -Force -Path $OutZygisk, $OutPayload | Out-Null
+New-Item -ItemType Directory -Force -Path $OutZygisk, $OutPayload, $OutCapability | Out-Null
 
 Copy-Item (Join-Path $ModBuild 'arm64-v8a.so')    (Join-Path $OutZygisk 'arm64-v8a.so') -Force
+Copy-Item (Join-Path $CapabilitySrc 'build-arm64/dex/classes.dex') (Join-Path $OutCapability 'classes.dex') -Force
+Copy-Item (Join-Path $CapabilitySrc 'build-arm64/control.jar') (Join-Path $OutCapability 'control.jar') -Force
 Copy-Item (Join-Path $NativeBuild 'libvdhs.so')   (Join-Path $OutPayload 'libvdhs.so') -Force
 Copy-Item (Join-Path $NativeBuild 'libvdhs_shell.so') (Join-Path $OutPayload 'libvdhs_shell.so') -Force
 Copy-Item (Join-Path $ReleaseDir 'VdHsMod.dll')   (Join-Path $OutPayload 'VdHsMod.dll') -Force
@@ -123,11 +128,12 @@ if ($Pack) {
     $stage = Join-Path $dist 'stage'
     if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
-    foreach ($f in 'module.prop', 'customize.sh', 'post-fs-data.sh', 'service.sh') {
+    foreach ($f in 'module.prop', 'customize.sh', 'post-fs-data.sh', 'service.sh', 'coldstart.sh', 'uninstall.sh') {
         Copy-Item (Join-Path $ModuleRoot $f) $stage -Force
     }
     Copy-Item $OutZygisk (Join-Path $stage 'zygisk') -Recurse -Force
     Copy-Item $OutPayload (Join-Path $stage 'payload') -Recurse -Force
+    Copy-Item $OutCapability (Join-Path $stage 'capability') -Recurse -Force
     & (Join-Path $RepoRoot 'tools/pack-module.ps1') -StagePath $stage -ZipPath $zip
     Remove-Item -Recurse -Force $stage
     Write-Host "packed: $zip"

@@ -6,3 +6,5 @@ payload/0Harmony.dll
 payload/Xenko.OpenXR.patched.dll
 payload/hand_mesh_fb.bin
 zygisk/arm64-v8a.so
+vd-capability.txt
+capability/

@@ -10,12 +10,21 @@ fi
 ui_print "- VD-PicoEnhance $MODVER"
 ui_print "- target process: VirtualDesktop.Android (untouched official APK)"
 ui_print "- VD enhancements are enabled by default; existing hand_gesture.txt overrides are kept."
+ui_print "- VD-only hand-mode startup support is enabled on the supported PICO firmware; APKs and global tracking stay unchanged."
 ui_print "- System gesture suppression is controlled only by VD's Input-tab switch (default: off)."
 ui_print "- Hand mesh is bundled and installed on first launch if missing."
 ui_print "- SteamVR hand passthrough follows VD's own VR hand-passthrough setting."
+
+# Keep an explicitly saved VD-only capability choice on upgrade.
+OLD=/data/adb/modules/vdhs_zygisk/vd-capability.txt
+if [ -f "$OLD" ] && [ ! -L "$OLD" ] && [ "$MODPATH/vd-capability.txt" != "$OLD" ]; then
+    cp "$OLD" "$MODPATH/vd-capability.txt" || abort "! Cannot preserve VD capability configuration."
+fi
 
 # Payload files must be readable when the module dir is opened before
 # specialization; keep the standard Magisk ownership/mode.
 set_perm_recursive "$MODPATH" 0 0 0755 0644
 set_perm_recursive "$MODPATH/payload" 0 0 0755 0644
 set_perm "$MODPATH/zygisk/arm64-v8a.so" 0 0 0644
+set_perm "$MODPATH/coldstart.sh" 0 0 0755
+set_perm "$MODPATH/uninstall.sh" 0 0 0755

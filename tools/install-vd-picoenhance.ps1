@@ -169,5 +169,5 @@ if ($NoReboot) {
 
 Write-Host ''
 Write-Host 'Done.' -ForegroundColor Green
-Write-Host 'After boot: if PICO is in gesture mode, pick up the controller once so' -ForegroundColor Gray
-Write-Host 'Virtual Desktop can cold-start, then start it and check that hands work.' -ForegroundColor Gray
+Write-Host 'After boot: on supported PICO firmware, the module declares VD hand-mode startup support.' -ForegroundColor Gray
+Write-Host 'Check coldstart.sh status/query before testing a hand-mode cold start; the APK is unchanged.' -ForegroundColor Gray

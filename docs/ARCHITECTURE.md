@@ -4,7 +4,8 @@ VD-PicoEnhance adds PICO hand tracking, hand passthrough and eye-gaze fixes to
 the **unmodified** Virtual Desktop app. It does not patch, repack, re-sign or
 rename the APK. The compatibility layer runs inside Virtual Desktop. Optional
 gesture suppression uses a separate payload inside PICO's Shell, disabled by
-default.
+default. A VD-only package-metadata helper supplies hand-mode startup support
+inside system_server on the verified PICO firmware.
 
 This document describes the shipped Zygisk route. It is written for readers who
 want to understand or build on the code; it is not required to install the
@@ -49,7 +50,25 @@ No module-level gesture setting or managed environment gate is used. Install and
 reboot once to load the receiver; subsequent UI changes need no restart.
 The hook is not installed in the OpenXR runtime service. Its private libc++
 layout is checked against the Shell's known streaming-app entry before hooking.
-The single-switch gesture round trip still needs headset validation.
+The in-app gesture switch is independent of the startup capability helper.
+
+### VD-only system launch capability
+
+`coldstart/java/org/vdpico/capability/` is the existing Android-10 metadata
+helper. Zygisk's server callbacks prepare its separate DEX and load it with
+`InMemoryDexClassLoader`; no VD, OpenXR or Mono payload is loaded into
+system_server. Startup returns after launching its worker threads rather than
+waiting for PackageManager on the server's boot thread.
+
+On the verified PICO 4 Pro / OS 5.13.7 fingerprint, full mode enables the helper
+by default, unless an explicitly saved disable choice exists. It copies VD's
+PMS metadata Bundle and adds only integer `handtracking=1`, then confirms it
+through the normal PackageManager getter. Disabling restores its owned key and
+original type/value without replacing later edits to other keys; external
+ownership conflicts are preserved. A replacement VD package gets a new baseline.
+The fixed root-only socket and `coldstart.sh` expose status, independent query,
+enable and disable. No global hand-tracking property or runtime event hook is
+changed, and this build contains no Index/MixedVR companion or PC selector.
 
 `vdhs_caps.c` separates the firmware's `ro.pxr.eyetracking.support` ET/FT hint
 from the runtime's enabled `XR_EXT_eye_gaze_interaction` system support result.

@@ -22,7 +22,8 @@ See the [changelog](CHANGELOG.md) for changes in each version.
 | Hand-tracking extension | Makes Virtual Desktop see `XR_EXT_hand_tracking` and injects the extension into the app's managed extension list | always on |
 | `XR_FB_hand_tracking_aim` | Synthesises pinch, menu gesture and pointing ray; the runtime's own aim is preferred when valid | `aim_*`, `pinch_*`, `menu_*` |
 | `XR_FB_hand_tracking_mesh` | Serves a hand mesh from `hand_mesh_fb.bin` (bundled in the module, or generated from your own headset) | enabled when the file exists |
-| Hand/controller hot-switch | Put the controller down to use hands, pick it up to go back | — |
+| PICO hand/controller hot-switch | Put the PICO controller down to use hands, pick it up to go back | — |
+| Hand-mode VD startup | Declare VD's hand-tracking capability to the system on supported PICO firmware | automatic in full mode |
 | Hand passthrough (in Virtual Desktop) | One projected layer per hand; the background passthrough state is restored when no hole is drawn | `pt_split`, `pt_bg_fix` |
 | Hand passthrough (in SteamVR) | Sets the alpha in place on Virtual Desktop's streamed swapchain, opening a hole only where a hand is; no copy, no extra layer | `pt_hole`, `pt_follow_settings` |
 | Joint freeze gate | Reports a hand as inactive when its joints have not updated for a while, easing the "hand flashes and disappears" behaviour | `hj_freeze_ms` (default 300 ms) |
@@ -39,7 +40,7 @@ The current source candidate adds capability gating for ordinary PICO 4 and othe
 | Headset | **PICO 4 Pro**, arm64-v8a |
 | Root | Magisk with **Zygisk enabled** (Zygisk API v5, i.e. Magisk ≥ 27000) |
 | Virtual Desktop | Android `VirtualDesktop.Android` **1.34.22.0**, unmodified |
-| PC (build only) | Windows + PowerShell, Android **NDK 26.1.10909125**, **CMake 3.22.1**, .NET SDK |
+| PC (build only) | Windows + PowerShell, Android **NDK 26.1.10909125**, **CMake 3.22.1**, **platform 35**, **build-tools 35.0.0**, **JDK 17**, .NET SDK |
 
 Other Virtual Desktop versions are untested. The compatibility layer works through symbols in the app's memory and the PICO runtime's resolution interface, but internal method names are version-specific.
 
@@ -56,6 +57,7 @@ For the full component breakdown, the hook list, the managed backends and the ro
 | `mod/native/` | VD payload `libvdhs.so`, optional Shell payload `libvdhs_shell.so`, tracking-capability policy and shared mapped-symbol resolver; vendored `third_party/shadowhook-2.0.1/` |
 | `mod/src/VdHsMod/` | Managed mod (netstandard2.0, reflection only, no reference to Virtual Desktop assemblies) |
 | `zygisk/` | Magisk/Zygisk module: injector `jni/`, `payload/` (`mode.txt`, `backend.txt`), `build.ps1` |
+| `coldstart/` | VD-only system package capability helper and its build script |
 | `tools/mesh/` | Converts the headset's own PICO hand mesh into `hand_mesh_fb.bin` |
 | `assets/mesh/` | The hand mesh blob shipped with releases, with provenance and disclaimer |
 | `config/` | `hand_gesture.txt` example with every runtime switch |
@@ -63,7 +65,7 @@ For the full component breakdown, the hook list, the managed backends and the ro
 
 ## Building
 
-Point `ANDROID_SDK_ROOT` (or `ANDROID_HOME`) at an Android SDK that has NDK 26.1.10909125 and CMake 3.22.1, or write the SDK path into the untracked `tools/sdk-path.txt`. Then:
+Point `ANDROID_SDK_ROOT` (or `ANDROID_HOME`) at an Android SDK with NDK 26.1.10909125, CMake 3.22.1, platform 35 and build-tools 35.0.0, or write the SDK path into the untracked `tools/sdk-path.txt`. Set `JAVA_HOME` to JDK 17, or put its path in the untracked `tools/jdk-path.txt`. Then:
 
 ```powershell
 # native payload + managed mod + Zygisk injector, staged into zygisk/payload/
@@ -98,13 +100,21 @@ Useful parameters: `-Mode 1` for an injection-only control run, `-NoReboot` to s
 
 To upgrade, run the installer from the new bundle to install the full module, then reboot the headset.
 
-> PICO blocks a Virtual Desktop cold start while it is in gesture mode. Pick up the controller, wait until `getprop sys.pxr.trackingservice.gesturemode` returns `0`, then start Virtual Desktop.
+> On supported PICO firmware, full mode declares VD's hand-tracking capability so it can start while the system is in hand mode. See the startup-support section below; no APK modification is needed.
 
 ## Configuration
 
 No configuration file is needed for the defaults. To adjust a feature, copy the relevant entries from [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) into `/data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt` on the headset. Every key is optional; a missing key keeps its built-in default. The example lists configurable keys and suggested values.
 
 SteamVR hand-passthrough holes are enabled by default (`pt_hole=1`) and follow VD's VR hand-passthrough setting. UI gaze smoothing and head-pose compensation are enabled by default; explicit values in an existing configuration override the defaults. Restart VD after saving changes.
+
+### Starting VD in system hand mode
+
+On PICO 4 Pro / PICO OS 5.13.7, full mode automatically supplies the integer `handtracking=1` declaration for VD in the system's in-memory package metadata. This allows the existing system launch check to recognize VD as hand-compatible. The official APK, signature, other applications and global hand-tracking settings remain unchanged. The helper is restricted to the verified Android 10 firmware fingerprint; other firmware is left unchanged.
+
+Reboot once after installing. To check readiness as root, run `sh /data/adb/modules/vdhs_zygisk/coldstart.sh status` and `sh /data/adb/modules/vdhs_zygisk/coldstart.sh query`. The first must report `applied` or `native` with `int1 ok`, and the independent query must report `metadata-query int1 ok` before testing a hand-mode cold start. The helper rechecks VD after package updates.
+
+For troubleshooting, `coldstart.sh disable` restores this helper's declaration and saves the disabled choice; `enable` turns it back on. Existing explicit choices are retained on upgrade. Smoke-test mode `1` does not load the helper; reboot after switching modes or disabling the entire module. This compatibility declaration is separate from the Input-tab gesture-suppression checkbox: it does not suppress gestures or switch between Index controllers and hands.
 
 ### System-gesture suppression (experimental, off by default)
 
