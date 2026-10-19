@@ -26,7 +26,7 @@ English | [简体中文](CHANGELOG_zh.md)
 
 ### Notes & Caveats
 
-- Source/build candidate for VD 1.34.22.0. On PICO 4 Pro / OS 5.13.7, the localized UI, in-app gesture switch and hand-mode cold start passed user checks. The system capability declaration was also confirmed through an independent PackageManager query. The official APK remains unchanged.
+- This integration includes the PICO 4 compatibility work adapted from PR #1, PR #2's UI features and the subsequent localization, single-switch and startup-support fixes. For VD 1.34.22.0, the contributor confirmed the integration works on ordinary PICO 4 in PR #2. On PICO 4 Pro / OS 5.13.7, the localized UI, in-app gesture switch and hand-mode cold start passed user checks; the capability declaration was also confirmed through an independent PackageManager query. The official APK remains unchanged.
 - Edit `payload/ui_zh.txt` and restart VD to change translations; literal `\n` represents a line break. Removing the table disables localization on the next VD launch.
 - Chinese system locales use the Simplified Chinese table; restart VD after changing the system language.
 - Reboot once after installing the single-switch revision. The former module-level `payload/system_gestures.txt` is ignored; existing app-private UI choices are preserved. Without a saved UI choice, suppression remains off.

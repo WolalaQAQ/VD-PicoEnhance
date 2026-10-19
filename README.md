@@ -3,9 +3,9 @@
 English | [简体中文](README_zh.md)
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
-![Platform: PICO 4 Pro](https://img.shields.io/badge/platform-PICO%204%20Pro-lightgrey)
+![Platform: PICO 4 / PICO 4 Pro](https://img.shields.io/badge/platform-PICO%204%20%2F%20PICO%204%20Pro-lightgrey)
 
-Brings **PICO optical hand tracking**, **Quest-style hand passthrough** and an **eye-gaze pointer fix** to the **unmodified official** Virtual Desktop (`VirtualDesktop.Android`) on the **PICO 4 Pro**.
+Brings **PICO optical hand tracking** and **Quest-style hand passthrough** to the **unmodified official** Virtual Desktop (`VirtualDesktop.Android`) on **PICO 4 and PICO 4 Pro**, with an **eye-gaze pointer fix** on supported hardware.
 
 VD-PicoEnhance is a Magisk/Zygisk module that injects a small OpenXR compatibility layer into the Virtual Desktop process at runtime. It does not modify, repack, re-sign or rename the Virtual Desktop APK; it only lets the app use PICO features that its bundled loader never asks for. Optional system-gesture suppression loads a separate payload into PICO's Shell and is disabled by default.
 
@@ -31,13 +31,13 @@ See the [changelog](CHANGELOG.md) for changes in each version.
 
 In SteamVR the hole follows the same conditions as Virtual Desktop's own `PassthroughPortals` logic (VR stream source, `VRPassthroughHands` enabled, hands as current input, and so on). Outside SteamVR the module does not touch any layer.
 
-The current source candidate adds capability gating for ordinary PICO 4 and other headsets without ET/FT hardware while retaining the Pro code. UI gaze fixes require runtime eye-gaze support. A firmware ET/FT hardware flag of `0` skips the PICO face-permission workaround; a missing flag keeps the existing permission-name compatibility behavior without claiming face support. New headset compatibility has not yet been tested on-device.
+Tracking features are enabled by capability, retaining the Pro eye-tracking code on headsets that support it. UI gaze fixes require runtime eye-gaze support. A firmware ET/FT hardware flag of `0` skips the PICO face-permission workaround; a missing flag keeps the existing permission-name compatibility behavior without claiming face support. The integration has been tested on PICO 4 Pro, and the contributor has confirmed it works on ordinary PICO 4 in [PR #2](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/2#issuecomment-6263664529).
 
 ## Requirements
 
 | Item | Requirement |
 |---|---|
-| Headset | **PICO 4 Pro**, arm64-v8a |
+| Headset | **PICO 4 or PICO 4 Pro**, arm64-v8a; eye-gaze features require eye-tracking hardware |
 | Root | Magisk with **Zygisk enabled** (Zygisk API v5, i.e. Magisk ≥ 27000) |
 | Virtual Desktop | Android `VirtualDesktop.Android` **1.34.22.0**, unmodified |
 | PC (build only) | Windows + PowerShell, Android **NDK 26.1.10909125**, **CMake 3.22.1**, **platform 35**, **build-tools 35.0.0**, **JDK 17**, .NET SDK |
@@ -190,7 +190,7 @@ Provenance and disclaimer: [`assets/mesh/README.md`](assets/mesh/README.md).
 - **Pinch (trigger) as a main-hand switch does not work in SteamVR.** With the hand open the trigger reads about 0.27 and never reaches 0, while Virtual Desktop only emits a digital click at exactly 1.0. A candidate fix is to add a dead zone and remap the trigger in the managed layer; untested.
 - **Eye gaze** still drifts slightly when you turn your head.
 - The runtime (or SteamVR) sometimes freezes the hand joints for a long time; the gesture then "flashes" and disappears. Restarting SteamVR recovers it.
-- The headset shows PICO's "gestures not supported" prompt; not handled for now.
+- PICO's "gestures not supported" launch prompt can still appear if startup support is disabled or the firmware is outside its supported fingerprint. See [Starting VD in system hand mode](#starting-vd-in-system-hand-mode).
 - A Virtual Desktop update can change internal names and break the layer until it is adapted.
 
 ## TODO
@@ -224,7 +224,7 @@ This is an unofficial, experimental community project. It does not contain, forw
 
 ## Acknowledgements
 
-- [misaka18848's PICO 4 contribution](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/1): Shell gesture-disable entry point and PowerShell 5.1 ZIP path fix.
+- [misaka18848's PICO 4 contributions](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/1): the Shell gesture-disable entry point and PowerShell 5.1 ZIP path fix, followed by the runtime UI switch and Chinese localization in [PR #2](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/2).
 
 - [ShadowHook](https://github.com/bytedance/android-inline-hook): the inline-hook runtime.
 - John "topjohnwu" Wu: the Magisk / Zygisk module API.

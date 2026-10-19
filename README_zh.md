@@ -3,9 +3,9 @@
 [English](README.md) | 简体中文
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
-![Platform: PICO 4 Pro](https://img.shields.io/badge/platform-PICO%204%20Pro-lightgrey)
+![Platform: PICO 4 / PICO 4 Pro](https://img.shields.io/badge/platform-PICO%204%20%2F%20PICO%204%20Pro-lightgrey)
 
-让 **PICO 4 Pro** 上**未经修改的官方** Virtual Desktop（`VirtualDesktop.Android`）用上 **PICO 光学手追**、**Quest 式手部透视**和**眼动手势指针修正**。
+让 **PICO 4 和 PICO 4 Pro** 上**未经修改的官方** Virtual Desktop（`VirtualDesktop.Android`）用上 **PICO 光学手追**和 **Quest 式手部透视**，并在支持的硬件上提供**眼动手势指针修正**。
 
 VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时向 Virtual Desktop 进程注入一层很小的 OpenXR 兼容层。它不修改、不重签、不改名、也不重打包 Virtual Desktop 的 APK，只是让应用用上厂商自带 loader 从不去申请的 PICO 功能。可选的系统手势屏蔽另向 PICO Shell 加载独立载荷，默认关闭。
 
@@ -31,13 +31,13 @@ VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时向 Virtual Desktop 
 
 SteamVR 里开孔的条件与 Virtual Desktop 自身的 `PassthroughPortals` 逻辑一致：串流源为 VR、`VRPassthroughHands` 打开、当前输入是手等。不在 SteamVR 时，模块不改动任何层。
 
-当前源码候选增加能力门控，面向普通 PICO 4 等缺少眼追／面捕硬件的设备，同时保留 Pro 代码。界面眼动修正要求运行时确认 gaze 支持；固件明确报告 ET/FT 硬件为 `0` 时跳过 PICO 面捕权限兼容。属性缺失时保留原权限名兼容行为，不因此宣称设备支持面捕。新增机型兼容尚未完成真机验证。
+追踪功能按能力启用，同时保留 Pro 眼动代码。界面眼动修正要求运行时确认 gaze 支持；固件明确报告 ET/FT 硬件为 `0` 时跳过 PICO 面捕权限兼容。属性缺失时保留原权限名兼容行为，不因此宣称设备支持面捕。整合版已在 PICO 4 Pro 上测试，贡献者也在 [PR #2](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/2#issuecomment-6263664529) 确认普通 PICO 4 工作正常。
 
 ## 使用条件
 
 | 组件 | 要求 |
 |---|---|
-| 头显 | **PICO 4 Pro**，arm64-v8a |
+| 头显 | **PICO 4 或 PICO 4 Pro**，arm64-v8a；眼动功能需要眼追硬件 |
 | Root | Magisk，且**已开启 Zygisk**（Zygisk API v5，即 Magisk ≥ 27000） |
 | Virtual Desktop | Android 版 `VirtualDesktop.Android` **1.34.22.0**，未修改 |
 | PC（仅构建用） | Windows + PowerShell、Android **NDK 26.1.10909125**、**CMake 3.22.1**、**platform 35**、**build-tools 35.0.0**、**JDK 17**、.NET SDK |
@@ -190,7 +190,7 @@ python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
 - **SteamVR 里用捏合（扳机）切换主手不生效。** 手张开时扳机值约为 0.27、从不为 0，而 Virtual Desktop 只在扳机值等于 1.0 时才发出数字 click。候选修法是在托管层给扳机加死区并重映射，尚未测试。
 - **Eye gaze** 转头时指针仍会轻微移动。
 - runtime（或 SteamVR）偶尔会让手部关节长时间冻结，手势"亮一下就消失"，重启 SteamVR 可以恢复。
-- 头显内会显示 PICO 的"不支持手势"提示框，暂不处理。
+- 启动支持被停用或固件不在其支持范围时，仍可能显示 PICO 的“不支持手势”启动提示，见[系统手势模式下启动 VD](#系统手势模式下启动-vd)。
 - Virtual Desktop 更新可能改动内部命名，导致兼容层失效，需要等适配。
 
 ## 待做
@@ -224,7 +224,7 @@ python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
 
 ## 致谢
 
-- [misaka18848 的 PICO 4 贡献](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/1)：Shell 手势禁用入口与 PowerShell 5.1 ZIP 路径修正。
+- [misaka18848 的 PICO 4 贡献](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/1)：Shell 手势禁用入口与 PowerShell 5.1 ZIP 路径修正，以及随后 [PR #2](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/2) 的运行时界面开关和中文汉化。
 
 - [ShadowHook](https://github.com/bytedance/android-inline-hook)：inline hook 运行时。
 - John "topjohnwu" Wu：Magisk / Zygisk 模块 API。
