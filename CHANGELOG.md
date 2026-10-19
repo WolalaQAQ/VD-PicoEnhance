@@ -2,6 +2,33 @@
 
 English | [简体中文](CHANGELOG_zh.md)
 
+## [Unreleased] - 2026-10-19
+
+### Features
+
+- Review the Chinese dictionary: preserve brand and technology names and humorous quality preset names, clarify passthrough windows, controller inputs, and frame-rate units, and distinguish feature-enablement limits from output quality.
+- Localize the control panel's cached page and templates at runtime. Use text-change events for changing captions, and reinitialize after graphics-device content recreation.
+- Control system-gesture suppression only through VD's Input-tab checkbox: "Suppress system gestures" / "屏蔽系统手势". Remove the separate module-level gesture configuration; default to off, retain saved UI choices and preserve the Shell's original focus condition.
+- Enable Chinese automatically for the headset's Chinese system language; leave other languages unchanged. Translate UI-thread caption changes synchronously instead of queueing quality changes for a later frame.
+- Localize the separate performance overlay and redraw its own target, retaining telemetry, units, device/GPU/codec names, text sizes and warning colors.
+- Match saved system-gesture parsing to the background mirror so the displayed state agrees; include fixed network warnings on computer cards created before localization.
+- Restore the original font when a mixed status field returns to a number, an untranslated technology name or a preserved quality-preset name.
+- Avoid font reassignment and additional full-panel redraws for repeated UI-thread captions with the same translated appearance. Keep full redraws for actual changes and asynchronous updates that may have exposed English.
+- Run the system-gesture receiver and state mirror in full mode; missing or invalid UI state is off, and property writes occur only when the normalized value changes.
+
+### Design Rationale
+
+- Reuse VD's cached UI resources, dispatcher, font and redraw path instead of recurring label scans or visual masking. Keep user data and live values separate from fixed captions.
+- Read the same installed-system language API used by VD, not the game thread's invariant culture. The performance overlay has its own render target, so redrawing the settings page alone is insufficient.
+- Keep receiver loading separate from the user's ON/OFF choice so enabling the checkbox needs no preliminary file edit or reboot. This requires a one-second state mirror in full mode even while suppression is off.
+
+### Notes & Caveats
+
+- Source/build candidate for VD 1.34.22.0; headset font, layout and interaction checks are pending. The official APK remains unchanged.
+- Edit `payload/ui_zh.txt` and restart VD to change translations; literal `\n` represents a line break. Removing the table disables localization on the next VD launch.
+- Chinese system locales use the Simplified Chinese table; restart VD after changing the system language. Visual checks and the complete system-gesture round trip remain pending.
+- Reboot once after installing the single-switch revision. The former module-level `payload/system_gestures.txt` is ignored; existing app-private UI choices are preserved. Without a saved UI choice, suppression remains off.
+
 ## 1.0.8-dev1 — 2026-10-18
 
 ### Features

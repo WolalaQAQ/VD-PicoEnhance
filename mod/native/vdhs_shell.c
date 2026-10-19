@@ -1,5 +1,5 @@
-// Optional Shell-side gesture suppression, adapted from misaka18848's PR #1.
-// This payload is only staged when explicitly enabled in full module mode.
+// Shell-side gesture suppression, adapted from misaka18848's PR #1.
+// Full mode stages the payload; only VD's saved Input-tab switch enables it.
 // It does not run in the OpenXR runtime service or change system properties.
 #define _GNU_SOURCE
 #include <pthread.h>
@@ -34,18 +34,11 @@ static unsigned char* g_disabled;
 
 static void hook_update(void* self, const char* package, const void* state, int is_self) {
     if (package && vdhs_shell_string_is(package, kVd)) {
-        // The original rechecks its whitelist every frame. Only override VD's
-        // decision; all other packages retain the complete original path.
-        unsigned char disabled = state ? (unsigned char)vdhs_shell_disable_for_vd(*(const int*)state, is_self) : 0;
-
-        // Live switch: the module mirrors VD's own Input-tab checkbox into this
-        // property, so the user can turn suppression off without a reboot. An
-        // empty or missing value keeps the decision above.
+        // Missing, invalid or OFF state must never suppress gestures. The UI
+        // switch cannot bypass the Shell's original focus/state predicate.
         char flag[PROP_VALUE_MAX] = {0};
-        if (__system_property_get(kSwitchProperty, flag) > 0) {
-            if (flag[0] == '0') disabled = 0;
-            else if (flag[0] == '1') disabled = 1;
-        }
+        int enabled = __system_property_get(kSwitchProperty, flag) == 1 && flag[0] == '1';
+        unsigned char disabled = enabled && state && vdhs_shell_disable_for_vd(*(const int*)state, is_self);
 
         if (*g_disabled != disabled) {
             *g_disabled = disabled;
@@ -73,7 +66,7 @@ static void* shell_thread(void* unused) {
     g_disabled = (unsigned char*)symbols[1];
     void* stub = shadowhook_hook_func_addr(symbols[0], (void*)hook_update, (void**)&g_original);
     if (!stub) LOGE("Shell hook failed: %s", shadowhook_to_errmsg(shadowhook_get_errno()));
-    else LOGI("optional Shell gesture suppression installed");
+    else LOGI("Shell gesture switch installed; suppression follows VD's Input tab");
     return NULL;
 }
 

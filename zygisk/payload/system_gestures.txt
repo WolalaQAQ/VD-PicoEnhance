@@ -1,4 +1,0 @@
-# Optional PICO Shell gesture suppression. Default: disabled.
-# 0 = do not inject the Shell payload; 1 = suppress recenter/dock while VD is focused.
-# Requires full mode (mode.txt=2). Reboot after changing this file.
-0

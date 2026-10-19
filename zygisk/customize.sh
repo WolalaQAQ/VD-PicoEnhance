@@ -10,14 +10,9 @@ fi
 ui_print "- VD-PicoEnhance $MODVER"
 ui_print "- target process: VirtualDesktop.Android (untouched official APK)"
 ui_print "- VD enhancements are enabled by default; existing hand_gesture.txt overrides are kept."
-ui_print "- Shell gesture suppression is off by default (payload/system_gestures.txt); reboot after changes."
+ui_print "- System gesture suppression is controlled only by VD's Input-tab switch (default: off)."
 ui_print "- Hand mesh is bundled and installed on first launch if missing."
 ui_print "- SteamVR hand passthrough follows VD's own VR hand-passthrough setting."
-
-OLD_GESTURES=/data/adb/modules/vdhs_zygisk/payload/system_gestures.txt
-if [ -f "$OLD_GESTURES" ] && [ ! -L "$OLD_GESTURES" ] && [ "$MODPATH/payload/system_gestures.txt" != "$OLD_GESTURES" ]; then
-    cp "$OLD_GESTURES" "$MODPATH/payload/system_gestures.txt" || abort "! Cannot preserve Shell gesture configuration."
-fi
 
 # Payload files must be readable when the module dir is opened before
 # specialization; keep the standard Magisk ownership/mode.

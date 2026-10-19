@@ -73,7 +73,7 @@ try {
     $extraEntries = @(
         'bin/helper', 'optional/helper-data.bin',
         'helper.sh', 'cleanup.sh',
-        'payload/libvdhs_shell.so', 'payload/system_gestures.txt',
+        'payload/libvdhs_shell.so', 'payload/optional-setting.txt',
         'payload/sub directory/[literal].bin', 'payload/.hidden', 'payload/empty.bin'
     )
     foreach ($name in $extraEntries) { Write-Fixture $name ([byte[]]@(0, 1, 127, 128, 255)) }

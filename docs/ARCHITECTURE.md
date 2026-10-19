@@ -31,7 +31,7 @@ Magisk / Zygisk
   copies the payload into the app's private data dir and calls the native entry
   point. The bundled hand mesh is installed only when missing, preserving a
   user's custom mesh. No C++ STL is used (Zygisk requires `APP_STL=none`).
-- `mod/native/` builds `libvdhs.so` and the optional `libvdhs_shell.so`. Both use
+- `mod/native/` builds `libvdhs.so` and the Shell receiver `libvdhs_shell.so`. Both use
   the thin `vdhs_sym.c` adapter over the already-vendored xDL; symbol batches
   select one mapped object and never force-load a second library or fill gaps
   from unrelated APKs. No mapped-object handle is cached across runtime reloads.
@@ -39,14 +39,17 @@ Magisk / Zygisk
   reference** to any Virtual Desktop / Xenko / Mono.Android assembly. Everything
   it touches is resolved by name through reflection.
 
-`com.picoxr.xrshell` is an additional, opt-in target. Before staging its separate
-`libvdhs_shell.so`, Zygisk reads `payload/system_gestures.txt` and the shared mode
-setting. The default `0`, or mode `1`, returns before staging or loading this
-payload. Existing Shell settings are preserved on upgrade. These settings are
-read when the process specializes; reboot after changing them. The Shell hook
-uses its existing per-app gesture decision and is not installed in the OpenXR
-runtime service. The private libc++ layout is checked against the Shell's known
-streaming-app entry before hooking. This candidate has no headset validation.
+`com.picoxr.xrshell` is an additional target in full mode (`2`); other modes
+return before staging its separate `libvdhs_shell.so`. VD's Input-tab checkbox
+is the only gesture-suppression control. Its saved app-private value is mirrored
+once per second to `vdhs.system_gestures`, with property writes only on changes.
+The Shell hook suppresses gestures only for focused VD with the exact value `1`;
+missing or invalid state is off, and other applications keep their original path.
+No module-level gesture setting or managed environment gate is used. Install and
+reboot once to load the receiver; subsequent UI changes need no restart.
+The hook is not installed in the OpenXR runtime service. Its private libc++
+layout is checked against the Shell's known streaming-app entry before hooking.
+The single-switch gesture round trip still needs headset validation.
 
 `vdhs_caps.c` separates the firmware's `ro.pxr.eyetracking.support` ET/FT hint
 from the runtime's enabled `XR_EXT_eye_gaze_interaction` system support result.

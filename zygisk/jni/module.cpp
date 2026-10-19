@@ -146,7 +146,7 @@ public:
         const char* environment_mode = getenv("VDHS_MODE");
         int fallback_mode = environment_mode && *environment_mode ? atoi(environment_mode) : 2;
         g_mode = read_module_setting(dir, "payload/mode.txt", fallback_mode);
-        if (shell && !vdhs_shell_requested(g_mode, read_module_setting(dir, "payload/system_gestures.txt", 0))) {
+        if (shell && !vdhs_shell_requested(g_mode)) {
             close(dir);
             return;
         }

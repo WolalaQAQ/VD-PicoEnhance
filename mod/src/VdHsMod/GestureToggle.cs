@@ -7,7 +7,7 @@ namespace VdHsMod
 {
     /// <summary>
     /// Adds a "Suppress system gestures" row to Virtual Desktop's Input tab and
-    /// keeps its state in <c>&lt;payload&gt;/system_gestures.txt</c>, which the
+    /// keeps its state in the app-private <c>vdhs/system_gestures.txt</c>, which the
     /// module mirrors to the Shell payload.
     ///
     /// VD builds its tabs from a UI asset and looks its controls up by name
@@ -30,6 +30,7 @@ namespace VdHsMod
         private static bool _started;
         private static bool _installed;
         private static object _checkBox;
+        private static object _installedRoot;
         private static int _lastWritten = -1;
 
         internal static void Start()
@@ -80,22 +81,7 @@ namespace VdHsMod
             {
                 try
                 {
-                    var box = _checkBox;
-                    if (box != null)
-                    {
-                        var val = Get(box, "IsChecked");
-                        int on = (val is bool b && b) ? 1 : 0;
-                        if (on != _lastWritten)
-                        {
-                            var path = FlagPath();
-                            if (path != null)
-                            {
-                                File.WriteAllText(path, on == 1 ? "1\n" : "0\n");
-                                _lastWritten = on;
-                                ModLog.Info("gesture toggle: " + (on == 1 ? "suppression ON" : "suppression OFF"));
-                            }
-                        }
-                    }
+                    Mirror();
                 }
                 catch (Exception ex)
                 {
@@ -105,15 +91,50 @@ namespace VdHsMod
             }
         }
 
+        private static void Mirror()
+        {
+            if (_checkBox == null) return;
+            var game = FindGame();
+            if (game == null) return;
+            object val = null;
+            Dispatch(game, () =>
+            {
+                Install(game);
+                val = Get(_checkBox, "IsChecked");
+            });
+            if (!(val is bool)) return;
+            int on = (bool)val ? 1 : 0;
+            if (on == _lastWritten) return;
+
+            var path = FlagPath();
+            if (path == null) return;
+            File.WriteAllText(path, on == 1 ? "1\n" : "0\n");
+            _lastWritten = on;
+            ModLog.Info("gesture toggle: " + (on == 1 ? "suppression ON" : "suppression OFF"));
+        }
+
         private static bool TryInstall()
         {
-            if (_installed) return false;
-
             var game = FindGame();
             if (game == null) return false;
+            bool added = false;
+            Dispatch(game, () => added = Install(game));
+            return added;
+        }
 
+        private static void Dispatch(object game, Action action)
+        {
+            var invoke = game.GetType().GetMethod("Invoke", new[] { typeof(Action) });
+            if (invoke == null) throw new InvalidOperationException("VD UI dispatcher is unavailable");
+            invoke.Invoke(game, new object[] { action });
+        }
+
+        private static bool Install(object game)
+        {
             var panel = Get(game, "ControlPanel");
             if (panel == null) return false;
+            var root = Get(panel, "_gridMain");
+            if (root == null || (_installed && ReferenceEquals(root, _installedRoot))) return false;
 
             var tabs = GetField(panel, "_tabPanels") as Array;
             if (tabs == null || tabs.Length < 4) return false;
@@ -157,64 +178,32 @@ namespace VdHsMod
             var existingLabel = FirstVisualChild(existing);
             if (existingLabel != null) CopyAppearance(existingLabel, text);
 
-            // EXPERIMENT: find a font that can actually draw Chinese. VD shows
-            // Chinese somewhere (its "寻求帮助" button), so the UI must already
-            // hold a CJK-capable SpriteFont; reuse that one.
-            // ControlPanel is a game system; its UI root is the _gridMain field.
-            var uiRoot = Get(panel, "_gridMain") ?? panel;
-            ModLog.Info("gesture toggle: UI root = " + Describe(uiRoot));
-            // Give the label a font that can draw non-Latin text, taken from VD's
-            // own UI (its help button is Chinese and uses the same SpriteFont).
-            var labelFont = FindCjkFont(uiRoot);
-            if (labelFont != null) TrySet(text, "Font", labelFont);
-
+            // This checkbox is the only user switch. Missing or invalid saved
+            // state means OFF; displaying the row does not create a setting.
+            bool initial = false;
             var path = FlagPath();
             if (path != null && File.Exists(path))
             {
                 try
                 {
-                    var saved = File.ReadAllText(path).Trim();
-                    TrySet(box, "IsChecked", saved == "1");
+                    // Match service.sh exactly: discard line endings, not spaces.
+                    // An invalid saved value must mean OFF in both.
+                    var saved = File.ReadAllText(path).Replace("\r", "").Replace("\n", "");
+                    if (saved == "0" || saved == "1") initial = saved == "1";
                 }
                 catch { }
             }
+            Set(box, "IsChecked", initial);
+            _lastWritten = initial ? 1 : 0;
 
             add.Invoke(children, new[] { box });
+            UiLocalize.LocalizeControl(box);
             _checkBox = box;
+            _installedRoot = root;
             _installed = true;
             ModLog.Info("gesture toggle: added to " + parent.GetType().FullName +
                         " (children=" + CountChildren(children) + ")");
             return true;
-        }
-
-        /// <summary>
-        /// Walks the UI tree looking for a TextBlock that already displays
-        /// Chinese, and returns the SpriteFont it uses.
-        /// </summary>
-        internal static object FindCjkFont(object root)
-        {
-            var queue = new System.Collections.Generic.Queue<object>();
-            if (root != null) queue.Enqueue(root);
-            int visited = 0;
-            while (queue.Count > 0 && visited < 20000)
-            {
-                var node = queue.Dequeue();
-                visited++;
-                if (node == null) continue;
-
-                var text = Get(node, "Text") as string;
-                if (!string.IsNullOrEmpty(text) && HasCjk(text))
-                {
-                    var font = Get(node, "Font");
-                    ModLog.Info("gesture toggle: UI text \"" + text + "\" uses font " + Describe(font));
-                    if (font != null) return font;
-                }
-
-                EnqueueChildren(queue, node, "Children");
-                EnqueueChildren(queue, node, "VisualChildren");
-            }
-            ModLog.Info("gesture toggle: walked " + visited + " UI nodes, no CJK text found");
-            return null;
         }
 
         internal static void EnqueueChildren(System.Collections.Generic.Queue<object> queue, object node, string member)
@@ -229,20 +218,6 @@ namespace VdHsMod
                 try { queue.Enqueue(indexer.GetValue(children, new object[] { i })); }
                 catch { }
             }
-        }
-
-        internal static bool HasCjk(string s)
-        {
-            foreach (var c in s)
-                if (c >= 0x3400 && c <= 0x9FFF) return true;
-            return false;
-        }
-
-        private static string Describe(object font)
-        {
-            if (font == null) return "(null)";
-            var name = Get(font, "Name") as string;
-            return font.GetType().FullName + (name != null ? " name=" + name : "");
         }
 
         private static object FirstVisualChild(object element)

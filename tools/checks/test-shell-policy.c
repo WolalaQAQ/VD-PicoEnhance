@@ -36,10 +36,10 @@ int entry(void) {
     if (parse("# missing\n", 0) != 0) return 4;
     if (parse("garbage", 0) != 0) return 5;
     if (parse("10", 0) != 0) return 6;
-    if (vdhs_shell_requested(2, 0)) return 7;
-    if (vdhs_shell_requested(1, 1)) return 8;
-    if (!vdhs_shell_requested(2, 1)) return 9;
-    if (vdhs_shell_requested(0, 1)) return 10;
+    if (vdhs_shell_requested(1)) return 7;
+    if (vdhs_shell_requested(0)) return 8;
+    if (!vdhs_shell_requested(2)) return 9;
+    if (vdhs_shell_requested(3)) return 10;
     if (!vdhs_shell_disable_for_vd(6, 0)) return 11;
     if (vdhs_shell_disable_for_vd(6, 1)) return 12;
     if (vdhs_shell_disable_for_vd(5, 0)) return 13;

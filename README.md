@@ -108,11 +108,27 @@ SteamVR hand-passthrough holes are enabled by default (`pt_hole=1`) and follow V
 
 ### System-gesture suppression (experimental, off by default)
 
-The current source candidate provides a module-level `payload/system_gestures.txt`: `0` disables it and `1` enables it. Reboot the headset after changing it. This is not a key in the app-private `hand_gesture.txt`. New installations default to off; upgrades preserve an existing setting.
+Use **Input → Suppress system gestures** in VD. On a Chinese system the label is **屏蔽系统手势**. This is the only gesture-suppression switch: it is always available in full mode, defaults to off and remembers your choice. Changes normally take effect within one to two seconds without restarting VD or the headset.
+
+The saved state is stored automatically in VD's private `vdhs/system_gestures.txt`; no manual file editing is needed. Existing saved UI choices are kept. The former module-level `payload/system_gestures.txt` is no longer used; a missing or invalid saved UI value means off.
+
+In full mode, a background mirror checks the saved UI state once a second and writes the Shell property only when the value changes. The receiver stays loaded so the checkbox can enable suppression at any time, but loading it does not enable suppression.
 
 When enabled, a separate Shell payload attempts to apply PICO's own streaming-app gesture-disable rule to focused VD, suppressing recenter/dock gestures. Other packages retain the original path. It does not inject into the OpenXR runtime service or change the global hand-tracking switch.
 
-The option requires mode `2`. Disabling it or selecting mode `1` also requires a headset reboot to remove an already-resident Shell hook; restarting VD alone does not unload it. This candidate has not been tested on a headset.
+Unchecking the UI restores system gestures and keeps the checkbox available. Reboot once after installing this revision to load the Shell receiver. Disabling the entire Magisk module or selecting smoke-test mode `1` also requires a reboot to unload the receiver. This single-switch revision still needs a headset gesture round-trip test.
+
+### Chinese UI (optional)
+
+Localization follows the headset's system language automatically: Chinese uses the Simplified Chinese table; other languages keep VD's original UI. No manual opt-in is needed. The language is read when VD starts, so restart VD after changing the system language.
+
+The module's `payload/ui_zh.txt` contains two-column translations as `English<TAB>Chinese`; literal `\n` encodes a line break. After VD loads its UI, the mod initializes the cached control panel, control templates and separate performance overlay once, reuses VD's Chinese font, and requests a normal redraw of the affected panel rather than masking old text with spaces, blank lines or background colors. It does not modify the APK. Restart VD after editing this module table; remove the module table and restart VD to disable localization.
+
+Computer/game/file names, folder paths, network names, accounts, clocks and live values retain their original text even when they match a dictionary entry. Overlay frame rates, latencies, bitrates, resolutions, GPU/codec/runtime names and original units are also unchanged. Fixed card captions such as "Disconnect" and "Local file" are handled separately.
+
+The initialization worker exits when finished. VD's text-change events update button and performance states synchronously on the UI thread; only background callbacks are queued, avoiding an extra frame for ordinary quality changes. New clones inherit translated templates, and mod-created switches are localized directly. Recreating the page releases old listeners and initializes the replacement. There is no recurring tree scan or label-check loop. Headset confirmation of fonts, layout and interaction is still pending for this candidate.
+
+Repeated UI-thread captions that produce the same translation and font do not request another full-panel redraw. Actual changes and background updates that may have exposed English still use a full redraw; this does not disable VD's normal layout or dirty-control processing.
 
 ### Hand mesh
 
