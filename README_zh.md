@@ -224,8 +224,7 @@ python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
 
 ## 致谢
 
-- [misaka18848 的 PICO 4 贡献](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/1)：Shell 手势禁用入口与 PowerShell 5.1 ZIP 路径修正，以及随后 [PR #2](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/2) 的运行时界面开关和中文汉化。
-
+- 感谢 [misaka18848](https://github.com/misaka18848) 为普通 PICO 4 所做的兼容工作（[PR #1](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/1)）、运行时手势屏蔽开关与中文汉化（[PR #2](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/2)），以及对整合版本进行的 PICO 4 真机测试。
 - [ShadowHook](https://github.com/bytedance/android-inline-hook)：inline hook 运行时。
 - John "topjohnwu" Wu：Magisk / Zygisk 模块 API。
 - `hand_mesh_fb.bin` 基于 PICO 系统手部 mesh，用 `tools/mesh/` 的离线工具转换。

@@ -224,8 +224,7 @@ This is an unofficial, experimental community project. It does not contain, forw
 
 ## Acknowledgements
 
-- [misaka18848's PICO 4 contributions](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/1): the Shell gesture-disable entry point and PowerShell 5.1 ZIP path fix, followed by the runtime UI switch and Chinese localization in [PR #2](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/2).
-
+- Thanks to [misaka18848](https://github.com/misaka18848) for the PICO 4 compatibility work in [PR #1](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/1), the runtime gesture-suppression switch and Chinese localization in [PR #2](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/2), and testing the integrated changes on a PICO 4 headset.
 - [ShadowHook](https://github.com/bytedance/android-inline-hook): the inline-hook runtime.
 - John "topjohnwu" Wu: the Magisk / Zygisk module API.
 - `hand_mesh_fb.bin` is derived from the PICO system hand mesh and converted with the offline tooling in `tools/mesh/`.
