@@ -4,9 +4,10 @@
 #             else harmony if compiled in and 0Harmony.dll is staged,
 #             else dataonly.
 #   redirect  preload Xenko.OpenXR.patched.dll.
-#   harmony   HarmonyLib runtime IL patches (build VdHsMod with -p:VdHsHarmony=true).
+#   harmony   legacy backend; unavailable in the current official VD runtime.
 #   dataonly  reflection data injection only (diagnostic; no IsControllerActive switch).
-#   none      injection smoke test only.
+#   none      skip backend changes; native/UI features still run in full mode.
+#             Use payload/mode.txt=1 and reboot for an injection-only control.
 #
 # The environment variable VDHS_BACKEND overrides this file.
 auto

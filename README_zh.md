@@ -7,13 +7,13 @@
 
 让 **PICO 4 和 PICO 4 Pro** 上**未经修改的官方** Virtual Desktop（`VirtualDesktop.Android`）用上 **PICO 光学手追**和 **Quest 式手部透视**，并在支持的硬件上提供**眼动手势指针修正**。
 
-VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时向 Virtual Desktop 进程注入一层很小的 OpenXR 兼容层。它不修改、不重签、不改名、也不重打包 Virtual Desktop 的 APK，只是让应用用上厂商自带 loader 从不去申请的 PICO 功能。可选的系统手势屏蔽另向 PICO Shell 加载独立载荷，默认关闭。
+VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时提供这些功能，官方 Virtual Desktop APK 保持原样。完整模式还会向 PICO Shell 加载手势接收端，屏蔽功能由 VD 内的开关开启；在支持的固件上，启动助手运行于 `system_server`，让 VD 可以在手势模式下启动。
 
-> 实验性，需要 root，且与 Virtual Desktop 版本相关。模块会 hook 一个闭源商业应用，Virtual Desktop 更新后可能失效。安装前请阅读[使用条件](#使用条件)、[已知问题](#已知问题)与[免责声明](#免责声明)。这是独立的社区项目，与 Virtual Desktop、PICO 官方无关。
+> 实验性，需要 root。已在 Virtual Desktop 1.34.22.0 上测试；升级 VD 后可能需要更新模块。
 
 ## 更新
 
-各版本的更新内容见[更新日志](CHANGELOG_zh.md)。
+本文说明当前源码。[更新日志的 Unreleased 部分](CHANGELOG_zh.md#unreleased---2026-10-19)尚未包含在发布包中，需构建源码才能试用；安装已发布整合包时，请查看其版本标签下的文档。
 
 ## 功能
 
@@ -31,7 +31,7 @@ VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时向 Virtual Desktop 
 
 SteamVR 里开孔的条件与 Virtual Desktop 自身的 `PassthroughPortals` 逻辑一致：串流源为 VR、`VRPassthroughHands` 打开、当前输入是手等。不在 SteamVR 时，模块不改动任何层。
 
-追踪功能按能力启用，同时保留 Pro 眼动代码。界面眼动修正要求运行时确认 gaze 支持；固件明确报告 ET/FT 硬件为 `0` 时跳过 PICO 面捕权限兼容。属性缺失时保留原权限名兼容行为，不因此宣称设备支持面捕。整合版已在 PICO 4 Pro 上测试，贡献者也在 [PR #2](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/2#issuecomment-6263664529) 确认普通 PICO 4 工作正常。
+眼动增强需要运行时确认眼追支持；普通 PICO 4 没有眼追硬件，也可使用手追与手部透视。整合版已在 PICO 4 Pro 上测试，贡献者也在 [PR #2](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/2#issuecomment-6263664529) 确认普通 PICO 4 工作正常。
 
 ## 使用条件
 
@@ -46,15 +46,15 @@ SteamVR 里开孔的条件与 Virtual Desktop 自身的 `PassthroughPortals` 逻
 
 ## 工作原理
 
-Zygisk 模块匹配 Virtual Desktop 进程，把原生载荷 `libvdhs.so` 与托管 mod `VdHsMod.dll` stage 到应用私有目录，并在 **Virtual Desktop 自带的 OpenXR loader** 的导出函数上安装 inline hook。兼容层通过这些 hook 访问 PICO runtime：申请 PICO 手追扩展、合成 FB aim/mesh 数据、写入手部透视开孔。系统库与已安装文件都不改动。
+Zygisk 模块匹配 Virtual Desktop 进程，把原生载荷 `libvdhs.so` 与托管 mod `VdHsMod.dll` stage 到应用私有目录，并在 **Virtual Desktop 自带的 OpenXR loader** 的导出函数上安装 inline hook。兼容层通过这些 hook 访问 PICO runtime：申请 PICO 手追扩展、合成 FB aim/mesh 数据、写入手部透视开孔。hook 作用于进程内存，磁盘上的 APK 和系统库保持原样。
 
-完整的组件划分、hook 列表、托管后端与健壮性约定见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
+组件划分、hook、能力检测和初始化过程见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
 ## 目录结构
 
 | 路径 | 内容 |
 |---|---|
-| `mod/native/` | VD 载荷 `libvdhs.so`、可选 Shell 载荷 `libvdhs_shell.so`、追踪能力策略和共用已映射符号解析器；内置 `third_party/shadowhook-2.0.1/` |
+| `mod/native/` | VD 载荷 `libvdhs.so`、Shell 接收端 `libvdhs_shell.so`、追踪能力策略和共用已映射符号解析器；内置 `third_party/shadowhook-2.0.1/` |
 | `mod/src/VdHsMod/` | 托管 mod（netstandard2.0，全程反射，不引用 Virtual Desktop 程序集） |
 | `zygisk/` | Magisk/Zygisk 模块：注入器 `jni/`、`payload/`（`mode.txt`、`backend.txt`）、`build.ps1` |
 | `coldstart/` | VD 专属系统包能力声明 helper 与构建脚本 |
@@ -71,11 +71,11 @@ Zygisk 模块匹配 Virtual Desktop 进程，把原生载荷 `libvdhs.so` 与托
 # 原生载荷 + 托管 mod + Zygisk 注入器，stage 到 zygisk/payload/
 pwsh -File zygisk/build.ps1
 
-# 额外打包 dist/vdhs_zygisk.zip（Magisk 安装包）
+# 额外打包 zygisk/dist/vdhs_zygisk.zip（Magisk 安装包）
 pwsh -File zygisk/build.ps1 -Pack
 ```
 
-原生载荷要求零警告；默认的托管构建不还原任何 NuGet 包，可以离线编译。
+原生载荷要求零警告；默认的托管构建不还原任何 NuGet 包，可以离线编译。生成的 `zygisk/dist/vdhs_zygisk.zip` 可按下方[手动安装](#手动安装)步骤刷入 Magisk。
 
 ## 安装
 
@@ -87,16 +87,16 @@ pwsh -File zygisk/build.ps1 -Pack
 powershell -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
 ```
 
-脚本会通过 adb 找到头显、检查 root、安装本地模块 ZIP、把本地 mesh 放到正确位置，最后重启头显。默认从脚本所在目录查找文件，不受终端当前工作目录影响；不会下载任何文件，缺少任一文件就报错退出。前提是头显已 root（Magisk + Zygisk）并打开 USB 调试。
+脚本会通过 adb 找到头显、检查 root、安装本地模块 ZIP，在网格缺失时放置网格，最后重启头显。已有网格会保留，只有显式传入 `-MeshPath` 才会替换。默认从脚本所在目录查找文件，不受终端当前工作目录影响；不会下载文件，缺少输入时退出。请开启 USB 调试并授权 PC，同时安装 Android platform-tools（`adb`）；脚本会从 PATH 和 Android SDK 环境变量查找，也可通过 `-Adb` 指定。
 
 常用参数：`-Mode 1` 只做注入对照测试，`-NoReboot` 不自动重启，`-ZipPath` / `-MeshPath` 指定其他位置的本地文件，`-Serial` 在多台设备时指定目标。要安装其他版本，使用对应 Release 的整合包即可。
 
 ### 手动安装
 
-1. 解压整合包，在 Magisk 里选择 **模块 → 从本地安装**，选择其中的 `vdhs_zygisk.zip`，然后重启头显。
+1. 如使用 Release 整合包，先解压。在 Magisk 里选择 **模块 → 从本地安装**，选择其中的 `vdhs_zygisk.zip` 或本地构建的模块 ZIP，然后重启头显。
 2. 启动 Virtual Desktop，模块会自动放置缺失的 `hand_mesh_fb.bin`，无需手动复制。
 
-`payload/mode.txt` 默认为 `2`，即完整兼容层。需要做“只注入、不加载托管层”的对照测试时，把 `/data/adb/modules/vdhs_zygisk/payload/mode.txt` 改成 `1`，重启 Virtual Desktop 生效。
+`payload/mode.txt` 默认为 `2`，即完整兼容层。需要只做注入对照测试时，以 root 把 `/data/adb/modules/vdhs_zygisk/payload/mode.txt` 改成 `1`，然后重启头显。这会一并卸载 Shell 接收端和启动助手，仅重启 VD 无法卸载它们。
 
 升级时，使用新版整合包重新运行安装脚本，安装完整模块并重启头显。
 
@@ -112,7 +112,7 @@ SteamVR 手部透视开孔默认开启（`pt_hole=1`），并跟随 VD 的“VR 
 
 在 PICO 4 Pro／PICO OS 5.13.7 上，完整模式默认在系统内存中的包元数据里为 VD 补充整数 `handtracking=1`，让系统原有的启动检查识别 VD 支持手追。官方 APK、签名、其他应用和全局手追设置均不变。helper 仅匹配已验证的 Android 10 固件指纹，其他固件保持原状。
 
-安装后重启一次。以 root 执行 `sh /data/adb/modules/vdhs_zygisk/coldstart.sh status` 与 `sh /data/adb/modules/vdhs_zygisk/coldstart.sh query`：前者需显示 `applied` 或 `native` 且为 `int1 ok`，独立查询需显示 `metadata-query int1 ok`，再测试手势模式冷启动。VD 更新后，helper 会重新检查包对象。
+安装后重启一次。以 root 执行 `sh /data/adb/modules/vdhs_zygisk/coldstart.sh status` 与 `sh /data/adb/modules/vdhs_zygisk/coldstart.sh query`。状态应显示 `applied` 或 `native`、值为 `int1`、结果为 `ok`；独立查询应显示 `metadata-query int1 ok`。确认后再用系统手势启动 VD。VD 更新后，启动助手会重新检查包对象。
 
 排查问题时，可用 `coldstart.sh disable` 恢复本 helper 补入的声明并保存停用选择，`enable` 重新启用；升级保留已有显式选择。烟雾测试模式 `1` 不加载此 helper，切换模式或禁用整个模块后需重启。它与输入页的手势屏蔽开关是两项功能：这里只解决系统允许启动 VD，不屏蔽系统手势，也不负责指虎与手追切换。
 
@@ -128,17 +128,13 @@ SteamVR 手部透视开孔默认开启（`pt_hole=1`），并跟随 VD 的“VR 
 
 取消勾选即恢复系统手势，开关仍保留。首次安装此修订后需重启一次头显以加载 Shell 接收端；禁用整个 Magisk 模块或切到烟雾测试模式 `1` 后，也需重启才能卸载接收端。
 
-### 中文界面（可选）
+### 中文界面
 
 汉化自动跟随头显系统语言：中文时使用简体中文词典，其他语言保持 VD 原界面，无需手动开启。模块在 VD 启动时读取系统语言，切换系统语言后重启 VD 生效。
 
-模块内的 `payload/ui_zh.txt` 提供两列词典，格式为 `英文<TAB>中文`，多行文案用字面量 `\n` 表示换行。模块在 VD 加载完界面后，一次初始化内存中的控制面板、控件模板和独立性能面板，复用 VD 自带中文字体，并让相应面板正常重绘，不用空格、空行或底色遮盖旧文字，也不修改 APK。修改此模块词典后重启 VD 生效；删除模块词典后重启 VD 可关闭汉化。
+汉化覆盖控制面板和 SteamVR 性能面板。电脑／游戏／文件名称、路径、网络名称、账号、时间、实时数值、设备名称和单位保留原文；“断开连接”“本地文件”等固定文字单独翻译。
 
-电脑名、游戏名、文件名、文件夹路径、网络名称、账号、时间和实时数值保留原文，即使与词典条目相同也不翻译。性能面板的帧率、延迟、码率、分辨率、GPU／编解码器／运行时名称及原始单位也不改动。列表卡片中的“断开连接”“本地文件”等固定文字单独处理。
-
-初始化线程完成后退出。按钮和性能状态变化时由 VD 自带的文字变化事件更新中文：界面线程的变化同步完成，后台回调才排入界面线程，避免为普通画质切换多等一帧。新复制的控件继承已翻译模板，mod 新增的开关直接汉化。页面重建时释放旧事件并重新初始化，不在后台反复扫描界面或检查所有标签。
-
-界面线程重复写入相同译文且字体未变时，不再额外请求整板重绘。真实变化及可能已显示英文的后台更新仍完整重绘；VD 正常的布局和脏控件处理保持不变。
+需要自定义翻译时，以 root 编辑 `/data/adb/modules/vdhs_zygisk/payload/ui_zh.txt`，然后重启 VD。每行格式为 `英文<TAB>中文`，字面量 `\n` 表示换行。删除该模块词典后重启 VD，可关闭汉化。
 
 ### 手部网格
 
@@ -200,21 +196,20 @@ python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
 
 ## 卸载与回滚
 
-- 快速回滚：把 `payload/mode.txt` 改回 `1`，重启 Virtual Desktop，VD 兼容层会被跳过。若启用过 Shell 手势屏蔽，还需整机重启才能移除该常驻 hook。
-- 彻底删除：在 Magisk 里禁用或移除模块并重启。
+- 注入对照：以 root 把 `/data/adb/modules/vdhs_zygisk/payload/mode.txt` 改成 `1`，然后重启头显。改回 `2` 时也需重启，让所有组件使用同一模式。
+- 在 Magisk 里禁用或移除模块，然后重启。需要手动禁用时，以 root 执行：
 
   ```sh
-  touch /data/adb/modules/vdhs_zygisk/disable   # 临时禁用
-  rm -rf /data/adb/modules/vdhs_zygisk          # 彻底删除
+  touch /data/adb/modules/vdhs_zygisk/disable
   ```
 
-- 可选清理 stage 出来的载荷：删除 `<app_data>/vdhs/`，即 `/data/data/VirtualDesktop.Android/vdhs/`。
+- 禁用或移除模块后，可删除 `/data/data/VirtualDesktop.Android/vdhs/` 清理暂存文件。这也会清除保存的开关、`hand_gesture.txt` 和自定义网格，请先备份需要保留的文件。
 
 ## 隐私与安全
 
 - 模块需要 **root**，并向 Virtual Desktop 注入代码。请只在自己的设备上，安装你自行构建或信任的版本。
 - 注入器将载荷放入目标应用的私有目录，不改 APK、清单、签名或包名。
-- 可选的手势屏蔽还会向 PICO Shell 注入载荷，默认关闭，不向 OpenXR runtime 服务注入。
+- 完整模式会加载 Shell 接收端，即使屏蔽开关处于关闭状态；在支持的固件上，还会向 `system_server` 加载仅处理 VD 元数据的启动助手。这两个组件都不向 OpenXR runtime 服务注入，也不修改全局手追设置。
 - 本仓库不打包任何 Virtual Desktop、Xenko、Mono 或 PICO 的二进制或源码，唯一的例外是 Release 整合包内的手部 mesh blob，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 - 提交 Issue 时请给出头显型号、PICO OS、Virtual Desktop 版本和脱敏后的日志片段，不要上传设备标识或签名密钥。
 

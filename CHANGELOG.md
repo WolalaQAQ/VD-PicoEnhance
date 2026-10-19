@@ -22,7 +22,7 @@ English | [简体中文](CHANGELOG_zh.md)
 - Reuse VD's cached UI resources, dispatcher, font and redraw path instead of recurring label scans or visual masking. Keep user data and live values separate from fixed captions.
 - Read the same installed-system language API used by VD, not the game thread's invariant culture. The performance overlay has its own render target, so redrawing the settings page alone is insufficient.
 - Keep receiver loading separate from the user's ON/OFF choice so enabling the checkbox needs no preliminary file edit or reboot. This requires a one-second state mirror in full mode even while suppression is off.
-- Keep launch compatibility separate from gesture suppression and Index hot-switching: change only VD's in-memory metadata, reuse the verified helper and leave the unfinished MixedVR companion/PC selector out of this build.
+- Keep launch compatibility separate from gesture suppression: the startup helper changes VD's in-memory metadata, while the Shell receiver handles gestures for focused VD. Neither changes the global hand-tracking setting.
 
 ### Notes & Caveats
 
@@ -30,6 +30,7 @@ English | [简体中文](CHANGELOG_zh.md)
 - Edit `payload/ui_zh.txt` and restart VD to change translations; literal `\n` represents a line break. Removing the table disables localization on the next VD launch.
 - Chinese system locales use the Simplified Chinese table; restart VD after changing the system language.
 - Reboot once after installing the single-switch revision. The former module-level `payload/system_gestures.txt` is ignored; existing app-private UI choices are preserved. Without a saved UI choice, suppression remains off.
+- Changing payload mode requires a headset reboot, even if gesture suppression was off; restarting VD alone does not unload the Shell receiver or startup helper.
 - Startup support is restricted to the verified PICO OS 5.13.7 Android-10 fingerprint. Build with JDK 17, Android platform 35 and build-tools 35.0.0; confirm `coldstart.sh status/query` before a hand-mode cold start.
 
 ## 1.0.8-dev1 — 2026-10-18

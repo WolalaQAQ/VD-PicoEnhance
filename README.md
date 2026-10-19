@@ -7,13 +7,13 @@ English | [简体中文](README_zh.md)
 
 Brings **PICO optical hand tracking** and **Quest-style hand passthrough** to the **unmodified official** Virtual Desktop (`VirtualDesktop.Android`) on **PICO 4 and PICO 4 Pro**, with an **eye-gaze pointer fix** on supported hardware.
 
-VD-PicoEnhance is a Magisk/Zygisk module that injects a small OpenXR compatibility layer into the Virtual Desktop process at runtime. It does not modify, repack, re-sign or rename the Virtual Desktop APK; it only lets the app use PICO features that its bundled loader never asks for. Optional system-gesture suppression loads a separate payload into PICO's Shell and is disabled by default.
+VD-PicoEnhance is a Magisk/Zygisk module that adds these features at runtime while keeping the official Virtual Desktop APK unchanged. Full mode also loads a gesture receiver into PICO's Shell; suppression stays off until enabled in VD. On supported firmware, a startup helper runs in `system_server` so VD can launch in hand mode.
 
-> Experimental, requires root, and tied to the Virtual Desktop version. The module hooks a closed-source commercial app and may break when Virtual Desktop updates. Read [Requirements](#requirements), [Known issues](#known-issues) and [Disclaimer](#disclaimer) before installing. This is an independent community project, not affiliated with Virtual Desktop or PICO.
+> Experimental and requires root. Tested with Virtual Desktop 1.34.22.0; a VD update may require an updated module.
 
 ## Updates
 
-See the [changelog](CHANGELOG.md) for changes in each version.
+This README describes the current source. Features under [Unreleased in the changelog](CHANGELOG.md#unreleased---2026-10-19) are not yet in a release bundle; build the source to try them. For a published bundle, use the documentation from its version tag.
 
 ## Features
 
@@ -31,7 +31,7 @@ See the [changelog](CHANGELOG.md) for changes in each version.
 
 In SteamVR the hole follows the same conditions as Virtual Desktop's own `PassthroughPortals` logic (VR stream source, `VRPassthroughHands` enabled, hands as current input, and so on). Outside SteamVR the module does not touch any layer.
 
-Tracking features are enabled by capability, retaining the Pro eye-tracking code on headsets that support it. UI gaze fixes require runtime eye-gaze support. A firmware ET/FT hardware flag of `0` skips the PICO face-permission workaround; a missing flag keeps the existing permission-name compatibility behavior without claiming face support. The integration has been tested on PICO 4 Pro, and the contributor has confirmed it works on ordinary PICO 4 in [PR #2](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/2#issuecomment-6263664529).
+Eye-gaze enhancements require runtime eye-tracking support; hand tracking and passthrough also work on ordinary PICO 4 without that hardware. The integration has been tested on PICO 4 Pro, and the contributor has confirmed it works on ordinary PICO 4 in [PR #2](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/2#issuecomment-6263664529).
 
 ## Requirements
 
@@ -46,15 +46,15 @@ Other Virtual Desktop versions are untested. The compatibility layer works throu
 
 ## How it works
 
-The Zygisk module matches the Virtual Desktop process, stages the native payload `libvdhs.so` and the managed mod `VdHsMod.dll` into the app's private directory, and installs inline hooks on the exports of **Virtual Desktop's own OpenXR loader**. Through those hooks the layer reaches the PICO runtime: it requests the PICO hand-tracking extensions, synthesises FB aim/mesh data and writes the hand-passthrough hole. No system library or installed file is changed.
+The Zygisk module matches the Virtual Desktop process, stages the native payload `libvdhs.so` and the managed mod `VdHsMod.dll` into the app's private directory, and installs inline hooks on the exports of **Virtual Desktop's own OpenXR loader**. Through those hooks the layer reaches the PICO runtime: it requests the PICO hand-tracking extensions, synthesises FB aim/mesh data and writes the hand-passthrough hole. The hooks change process memory; the APK and system libraries on disk remain unchanged.
 
-For the full component breakdown, the hook list, the managed backends and the robustness contract, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+For the component breakdown, hooks, capability detection and initialization behavior, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
-| `mod/native/` | VD payload `libvdhs.so`, optional Shell payload `libvdhs_shell.so`, tracking-capability policy and shared mapped-symbol resolver; vendored `third_party/shadowhook-2.0.1/` |
+| `mod/native/` | VD payload `libvdhs.so`, Shell receiver `libvdhs_shell.so`, tracking-capability policy and shared mapped-symbol resolver; vendored `third_party/shadowhook-2.0.1/` |
 | `mod/src/VdHsMod/` | Managed mod (netstandard2.0, reflection only, no reference to Virtual Desktop assemblies) |
 | `zygisk/` | Magisk/Zygisk module: injector `jni/`, `payload/` (`mode.txt`, `backend.txt`), `build.ps1` |
 | `coldstart/` | VD-only system package capability helper and its build script |
@@ -71,11 +71,11 @@ Point `ANDROID_SDK_ROOT` (or `ANDROID_HOME`) at an Android SDK with NDK 26.1.109
 # native payload + managed mod + Zygisk injector, staged into zygisk/payload/
 pwsh -File zygisk/build.ps1
 
-# additionally pack dist/vdhs_zygisk.zip (the Magisk module)
+# additionally pack zygisk/dist/vdhs_zygisk.zip (the Magisk module)
 pwsh -File zygisk/build.ps1 -Pack
 ```
 
-The native payload must build with zero warnings; the default managed build restores no NuGet packages and compiles offline.
+The native payload must build with zero warnings; the default managed build restores no NuGet packages and compiles offline. Install the resulting `zygisk/dist/vdhs_zygisk.zip` through Magisk as described under [Manual installation](#manual-installation).
 
 ## Installation
 
@@ -87,16 +87,16 @@ Download `VD-PicoEnhance-v<version>.zip` from [Releases](https://github.com/Wola
 powershell -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
 ```
 
-The script finds the headset over adb, checks root, installs the local module ZIP, places the local mesh in the right directory, and reboots the headset. It looks beside the script, regardless of the terminal's working directory; it never downloads files and stops if either file is missing. The headset must be rooted (Magisk + Zygisk) with USB debugging enabled.
+The script finds the headset over adb, checks root, installs the local module ZIP, places the mesh if missing, and reboots the headset. Existing meshes are preserved unless you explicitly pass `-MeshPath`. It looks beside the script regardless of the terminal's working directory, never downloads files, and stops if an input is missing. Enable USB debugging and authorize the PC. Install Android platform-tools (`adb`); the script checks PATH and the Android SDK environment variables, or you can supply `-Adb`.
 
 Useful parameters: `-Mode 1` for an injection-only control run, `-NoReboot` to skip the automatic reboot, `-ZipPath` / `-MeshPath` to specify local files elsewhere, and `-Serial` to pick a device when several are connected. To install a different version, use the bundle from that release.
 
 ### Manual installation
 
-1. Extract the bundle. In Magisk choose **Modules → Install from storage**, select the included `vdhs_zygisk.zip`, then reboot the headset.
+1. If using a release bundle, extract it first. In Magisk choose **Modules → Install from storage**, select its `vdhs_zygisk.zip` or your locally built module ZIP, then reboot the headset.
 2. Launch Virtual Desktop. The module installs `hand_mesh_fb.bin` if missing; no manual copy is needed.
 
-`payload/mode.txt` defaults to `2`, the full layer. For a control run that only injects and does not load the managed layer, change `/data/adb/modules/vdhs_zygisk/payload/mode.txt` to `1` and restart Virtual Desktop.
+`payload/mode.txt` defaults to `2`, the full layer. For an injection-only control run, set `/data/adb/modules/vdhs_zygisk/payload/mode.txt` to `1` as root and reboot the headset. This also unloads the Shell receiver and startup helper; restarting VD alone does not unload them.
 
 To upgrade, run the installer from the new bundle to install the full module, then reboot the headset.
 
@@ -112,7 +112,7 @@ SteamVR hand-passthrough holes are enabled by default (`pt_hole=1`) and follow V
 
 On PICO 4 Pro / PICO OS 5.13.7, full mode automatically supplies the integer `handtracking=1` declaration for VD in the system's in-memory package metadata. This allows the existing system launch check to recognize VD as hand-compatible. The official APK, signature, other applications and global hand-tracking settings remain unchanged. The helper is restricted to the verified Android 10 firmware fingerprint; other firmware is left unchanged.
 
-Reboot once after installing. To check readiness as root, run `sh /data/adb/modules/vdhs_zygisk/coldstart.sh status` and `sh /data/adb/modules/vdhs_zygisk/coldstart.sh query`. The first must report `applied` or `native` with `int1 ok`, and the independent query must report `metadata-query int1 ok` before testing a hand-mode cold start. The helper rechecks VD after package updates.
+Reboot once after installing. As root, run `sh /data/adb/modules/vdhs_zygisk/coldstart.sh status` and `sh /data/adb/modules/vdhs_zygisk/coldstart.sh query`. The status should show `applied` or `native`, the value `int1`, and a successful `ok` result; the independent query should show `metadata-query int1 ok`. Then test launching VD in hand mode. The helper rechecks VD after package updates.
 
 For troubleshooting, `coldstart.sh disable` restores this helper's declaration and saves the disabled choice; `enable` turns it back on. Existing explicit choices are retained on upgrade. Smoke-test mode `1` does not load the helper; reboot after switching modes or disabling the entire module. This compatibility declaration is separate from the Input-tab gesture-suppression checkbox: it does not suppress gestures or switch between Index controllers and hands.
 
@@ -128,17 +128,13 @@ When enabled, a separate Shell payload attempts to apply PICO's own streaming-ap
 
 Unchecking the UI restores system gestures and keeps the checkbox available. Reboot once after installing this revision to load the Shell receiver. Disabling the entire Magisk module or selecting smoke-test mode `1` also requires a reboot to unload the receiver.
 
-### Chinese UI (optional)
+### Chinese UI
 
 Localization follows the headset's system language automatically: Chinese uses the Simplified Chinese table; other languages keep VD's original UI. No manual opt-in is needed. The language is read when VD starts, so restart VD after changing the system language.
 
-The module's `payload/ui_zh.txt` contains two-column translations as `English<TAB>Chinese`; literal `\n` encodes a line break. After VD loads its UI, the mod initializes the cached control panel, control templates and separate performance overlay once, reuses VD's Chinese font, and requests a normal redraw of the affected panel rather than masking old text with spaces, blank lines or background colors. It does not modify the APK. Restart VD after editing this module table; remove the module table and restart VD to disable localization.
+Translations cover the control panel and SteamVR performance overlay. Computer/game/file names, paths, network names, accounts, clocks, telemetry, device names and units retain their original text. Fixed card captions such as "Disconnect" and "Local file" are translated separately.
 
-Computer/game/file names, folder paths, network names, accounts, clocks and live values retain their original text even when they match a dictionary entry. Overlay frame rates, latencies, bitrates, resolutions, GPU/codec/runtime names and original units are also unchanged. Fixed card captions such as "Disconnect" and "Local file" are handled separately.
-
-The initialization worker exits when finished. VD's text-change events update button and performance states synchronously on the UI thread; only background callbacks are queued, avoiding an extra frame for ordinary quality changes. New clones inherit translated templates, and mod-created switches are localized directly. Recreating the page releases old listeners and initializes the replacement. There is no recurring tree scan or label-check loop.
-
-Repeated UI-thread captions that produce the same translation and font do not request another full-panel redraw. Actual changes and background updates that may have exposed English still use a full redraw; this does not disable VD's normal layout or dirty-control processing.
+To customize translations, edit `/data/adb/modules/vdhs_zygisk/payload/ui_zh.txt` as root, then restart VD. Each entry is `English<TAB>Chinese`; literal `\n` encodes a line break. Remove that module table and restart VD to disable localization.
 
 ### Hand mesh
 
@@ -200,21 +196,20 @@ Provenance and disclaimer: [`assets/mesh/README.md`](assets/mesh/README.md).
 
 ## Uninstall and rollback
 
-- Quick rollback: set `payload/mode.txt` back to `1` and restart Virtual Desktop; the VD compatibility layer is skipped. If Shell gesture suppression was enabled, reboot the headset to remove that resident hook too.
-- Full removal: disable or remove the module in Magisk and reboot.
+- Injection-only control: set `/data/adb/modules/vdhs_zygisk/payload/mode.txt` to `1` as root and reboot the headset. Switching back to `2` also requires a reboot so all components use the same mode.
+- Disable or remove the module in Magisk, then reboot. To disable it manually, run as root:
 
   ```sh
-  touch /data/adb/modules/vdhs_zygisk/disable   # disable temporarily
-  rm -rf /data/adb/modules/vdhs_zygisk          # remove completely
+  touch /data/adb/modules/vdhs_zygisk/disable
   ```
 
-- Optionally clean the staged payload: delete `<app_data>/vdhs/`, that is `/data/data/VirtualDesktop.Android/vdhs/`.
+- After disabling or removing the module, you can delete `/data/data/VirtualDesktop.Android/vdhs/` to clean up staged files. This also removes saved switches, `hand_gesture.txt` and custom meshes; back up any files you want to keep first.
 
 ## Privacy and security
 
 - The module needs **root** and injects code into Virtual Desktop. Use it only on your own device and only with a build you made yourself or trust.
 - The injector stages payloads into the target app's private directory; it does not change the APK, manifest, signature or package name.
-- Optional gesture suppression also injects into PICO's Shell. It defaults off and does not inject into the OpenXR runtime service.
+- Full mode loads the Shell receiver even while suppression is off. On the supported firmware it also loads the VD-only metadata helper into `system_server`. Neither component injects into the OpenXR runtime service or changes the global hand-tracking setting.
 - This repository bundles no Virtual Desktop, Xenko, Mono or PICO binaries or sources, with the single exception of the hand mesh blob included in the release bundle; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - When opening an issue, include the headset model, PICO OS version, Virtual Desktop version and sanitized log excerpts. Do not upload device identifiers or signing keys.
 

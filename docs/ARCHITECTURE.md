@@ -2,14 +2,13 @@
 
 VD-PicoEnhance adds PICO hand tracking, hand passthrough and eye-gaze fixes to
 the **unmodified** Virtual Desktop app. It does not patch, repack, re-sign or
-rename the APK. The compatibility layer runs inside Virtual Desktop. Optional
-gesture suppression uses a separate payload inside PICO's Shell, disabled by
-default. A VD-only package-metadata helper supplies hand-mode startup support
-inside system_server on the verified PICO firmware.
+rename the APK. The compatibility layer runs inside Virtual Desktop. Full mode
+also loads a gesture receiver inside PICO's Shell; suppression defaults to off.
+A VD-only package-metadata helper supplies hand-mode startup support inside
+system_server on the verified PICO firmware.
 
-This document describes the shipped Zygisk route. It is written for readers who
-want to understand or build on the code; it is not required to install the
-module.
+This document describes the current source's Zygisk route for readers who want
+to understand or build on the code. Installation instructions are in the README.
 
 ## 1. Components
 
@@ -93,7 +92,7 @@ track the installed build:
 | `xrCreateInstance` | Mark fallback, append the PICO controller extension, strip layer-only extensions. |
 | `xrGetInstanceProcAddr` | Extension-function wrapper table (serves the FB/EXT hand functions). |
 | `xrCreateAction` / `xrGetActionStatePose` | Track `grip_pose`; report the controller pose inactive while PICO's active input is the hand. |
-| `xrGetSystemProperties` | Log the runtime's hand-tracking support flag. |
+| `xrGetSystemProperties` | Log hand-tracking support and observe eye-gaze support for capability gating. |
 | `xrEndFrame` / `xrPollEvent` | Layer-list / passthrough event handling and permission fixes. |
 | `xrCreateActionSpace` / `xrLocateSpace` | Eye-gaze logging and pointer-only filtering / coordinate compensation. |
 | `xrReleaseSwapchainImage` (and friends, see `vdhs_pt.c`) | Hand-passthrough hole (below). |
@@ -182,41 +181,69 @@ settings enabled, logs showed pointer processing `1/1` and head-relative
 processing `0/0` on both the streaming and render threads. The user reported
 normal foveated-region following and menu-pointer behaviour.
 
-## 4. Managed backends
+## 4. Managed mod
 
-`VdHsMod.dll` installs the hand/controller hot-switch behaviour. The backend is
-chosen at runtime (no rebuild) through `payload/backend.txt` / `VDHS_BACKEND`:
+`VdHsMod.dll` supplies managed extension-list changes, the in-app gesture switch
+and localization. The native layer handles PICO hand/controller pose selection.
+The managed backend is chosen through `payload/backend.txt` / `VDHS_BACKEND`:
+
+### 4.1 Backends
 
 | Backend | What it does | State |
 |---|---|---|
-| `auto` (default) | redirect if a patched `Xenko.OpenXR.dll` is staged, else dataonly. | — |
+| `auto` (default) | In the default build, redirect if a patched `Xenko.OpenXR.dll` is staged, else dataonly. | — |
 | `redirect` | Preload a locally produced, MVID-bumped `Xenko.OpenXR.patched.dll` so VD uses it instead of its store copy. Survives the APK's AOT images. | experimental; needs a patched DLL you build yourself |
-| `dataonly` | Reflection-only data injection: enable the PICO extension but do not change `IsControllerActive`. | safe fallback |
-| `none` | Injection smoke test only. | — |
+| `dataonly` | Reflection-only data injection: enable the PICO extension but do not change `IsControllerActive`. | default without a redirect artifact |
+| `none` | Skip backend changes; in full mode the native layer and managed UI features still run. | not an injection-only control |
 
 None of these backends modify the installed APK; `redirect` only loads an
-assembly you already produced for your own device.
+assembly you already produced for your own device. Use mode `1`, not backend
+`none`, for an injection-only control run. Restart VD after changing the backend.
+
+### 4.2 UI switch and localization
+
+`GestureToggle` creates the Input-tab checkbox at runtime and saves its value in
+the app-private `system_gestures.txt`. `service.sh` mirrors this value to the Shell;
+the module does not need a second gesture-enablement setting.
+
+`UiLocalize` reads `InstalledUICulture` at startup and loads `ui_zh.txt` only for
+Chinese system languages. It initializes the cached control-panel pages,
+templates and separate performance-overlay page once their resources are ready.
+Each text binding retains its original font and actual owner/root. User data,
+telemetry, device names and units remain separate from fixed captions.
+
+Text-change events translate UI-thread updates synchronously; background updates
+are queued to the UI thread. Each panel redraws its own render target. Repeated
+captions with the same translation and font skip an extra full redraw, while
+asynchronous updates retain it to clear any English that may have rendered.
+Mixed fields restore their original font when returning to numbers or preserved
+names. Page recreation releases the old listeners and initializes the replacement;
+the initialization worker exits rather than scanning labels continuously.
 
 ## 5. Configuration and rollback
 
-- `payload/mode.txt` (and `VDHS_MODE`): `1` = injection smoke test only
-  (rollback), `2` = full layer. The module ships `2` (the full layer); set it to
-  `1` for a control run that leaves the managed runtime untouched.
+- `payload/mode.txt`: `1` = injection-only control,
+  `2` = full layer (default). Mode `1` checks that Mono is reachable without
+  starting the native compatibility layer or loading the managed mod. Reboot
+  the headset after changing modes so the Shell receiver, startup helper and
+  gesture-state mirror use the same mode.
 - `payload/backend.txt` (and `VDHS_BACKEND`): managed backend, above.
 - `<app_data>/vdhs/hand_gesture.txt`: the runtime feature toggles.
 
-No feature configuration file is needed for a fresh installation. User-facing
-features default on, including `pt_bg_fix`, `pt_split`, `pt_hole`,
+No feature configuration file is needed for a fresh installation. Tracking
+defaults include `pt_bg_fix`, `pt_split`, `pt_hole`,
 `gaze_filter`, `gaze_vd_fix`, and the 300 ms joint freeze gate. SteamVR drawing
 still follows VD's own settings (`pt_follow_settings=1`). Diagnostic switches
 (`gaze_log`, `hj_diag_ms`, `pt_alpha_only`, `pt_style`) default off. Existing explicit
 configuration values take precedence; the module never rewrites that file.
+Gesture suppression defaults off, localization follows the system language, and
+the startup helper defaults on only for its verified firmware fingerprint.
 
-## 6. Robustness contract
+## 6. Initialization and hook failure handling
 
-The mod must never take down the host process. `VdHsMod.Loader.Start()` is fully
-guarded: every step degrades to a no-op on failure, and the native payload does
-its work on a detached thread rather than blocking VD's main thread.
+`VdHsMod.Loader.Start()` catches and logs managed exceptions. The native payload
+uses a detached worker to wait for Mono and load the managed mod, rather than
+waiting for the runtime in the app-specialization callback.
 
 Native loader hooks become active together only after all required hooks are
 installed. A failed installation rolls back its hooks; callbacks remain
@@ -228,10 +255,11 @@ leave runtime negotiation to VD-thread hooks, including after installation fails
 
 ## 7. Scope and limitations
 
-- Target: PICO 4 Pro, arm64, Virtual Desktop Android 1.34.22.0. Internal
+- Targets: PICO 4 and PICO 4 Pro, arm64, Virtual Desktop Android 1.34.22.0. Internal
   layout/names are version-specific; a Virtual Desktop update can break the
   layer.
-- Root + Zygisk are required. The module does not touch the APK, the manifest,
-  the signature or the package name, and does not modify other processes.
+- Root + Zygisk are required. Full mode loads code into VD and PICO Shell, and
+  loads the startup helper into system_server on its supported firmware. The
+  APK, manifest, signature and package name remain unchanged.
 - It is a community interoperability project and is not affiliated with Virtual
   Desktop or PICO.

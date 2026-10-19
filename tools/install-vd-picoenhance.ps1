@@ -12,7 +12,7 @@
     Keep this script, vdhs_zygisk.zip and hand_mesh_fb.bin together. This script
     never downloads files; missing files cause an error before any device changes.
 
-    Requirements: a rooted PICO 4 Pro (Magisk with Zygisk), Virtual Desktop
+    Requirements: a rooted PICO 4 or PICO 4 Pro (Magisk with Zygisk), Virtual Desktop
     Android 1.34.22.0 installed, and adb available (on PATH, or via -Adb, or
     under $env:ANDROID_HOME / $env:ANDROID_SDK_ROOT).
 
