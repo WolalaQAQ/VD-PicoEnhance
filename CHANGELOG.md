@@ -2,36 +2,28 @@
 
 English | [简体中文](CHANGELOG_zh.md)
 
-## [Unreleased] - 2026-10-19
+## 1.0.8 — 2026-10-19
 
 ### Features
 
-- Review the Chinese dictionary: preserve brand and technology names and humorous quality preset names, clarify passthrough windows, controller inputs, and frame-rate units, and distinguish feature-enablement limits from output quality.
-- Localize the control panel's cached page and templates at runtime. Use text-change events for changing captions, and reinitialize after graphics-device content recreation.
-- Control system-gesture suppression only through VD's Input-tab checkbox: "Suppress system gestures" / "屏蔽系统手势". Remove the separate module-level gesture configuration; default to off, retain saved UI choices and preserve the Shell's original focus condition.
-- Enable Chinese automatically for the headset's Chinese system language; leave other languages unchanged. Translate UI-thread caption changes synchronously instead of queueing quality changes for a later frame.
-- Localize the separate performance overlay and redraw its own target, retaining telemetry, units, device/GPU/codec names, text sizes and warning colors.
-- Match saved system-gesture parsing to the background mirror so the displayed state agrees; include fixed network warnings on computer cards created before localization.
-- Restore the original font when a mixed status field returns to a number, an untranslated technology name or a preserved quality-preset name.
-- Avoid font reassignment and additional full-panel redraws for repeated UI-thread captions with the same translated appearance. Keep full redraws for actual changes and asynchronous updates that may have exposed English.
-- Run the system-gesture receiver and state mirror in full mode; missing or invalid UI state is off, and property writes occur only when the normalized value changes.
-- Include the existing VD-only PackageManager capability declaration so supported PICO firmware recognizes VD in system hand mode. Enable it by default in full mode, retain explicit choices and add the separate DEX/client build, packaging and uninstall recovery.
+- Support ordinary PICO 4 through tracking-capability detection while retaining the Pro eye-tracking path.
+- Add one VD Input-tab switch for system-gesture suppression, off by default with the user's choice saved. No external enablement setting is needed.
+- Localize the control panel and SteamVR performance overlay automatically on Chinese systems; keep names, telemetry and units unchanged.
+- Fix changing captions and mixed-font fields, and avoid extra redraws when the translated appearance has not changed.
+- Enable hand-mode VD startup on the verified PICO 4 Pro / OS 5.13.7 Android-10 firmware fingerprint, without changing the official APK or global tracking settings.
+- Share mapped-library symbol resolution through xDL and produce portable module ZIPs on PowerShell 5.1 and 7.
 
 ### Design Rationale
 
-- Reuse VD's cached UI resources, dispatcher, font and redraw path instead of recurring label scans or visual masking. Keep user data and live values separate from fixed captions.
-- Read the same installed-system language API used by VD, not the game thread's invariant culture. The performance overlay has its own render target, so redrawing the settings page alone is insufficient.
-- Keep receiver loading separate from the user's ON/OFF choice so enabling the checkbox needs no preliminary file edit or reboot. This requires a one-second state mirror in full mode even while suppression is off.
-- Keep launch compatibility separate from gesture suppression: the startup helper changes VD's in-memory metadata, while the Shell receiver handles gestures for focused VD. Neither changes the global hand-tracking setting.
+- Gate tracking changes by capability rather than removing Pro features to support PICO 4.
+- Reuse VD's UI resources and text-change events. Keep the in-memory launch declaration separate from the Shell's gesture-suppression switch.
 
 ### Notes & Caveats
 
-- This integration includes the PICO 4 compatibility work adapted from PR #1, PR #2's UI features and the subsequent localization, single-switch and startup-support fixes. For VD 1.34.22.0, the contributor confirmed the integration works on ordinary PICO 4 in PR #2. On PICO 4 Pro / OS 5.13.7, the localized UI, in-app gesture switch and hand-mode cold start passed user checks; the capability declaration was also confirmed through an independent PackageManager query. The official APK remains unchanged.
-- Edit `payload/ui_zh.txt` and restart VD to change translations; literal `\n` represents a line break. Removing the table disables localization on the next VD launch.
-- Chinese system locales use the Simplified Chinese table; restart VD after changing the system language.
-- Reboot once after installing the single-switch revision. The former module-level `payload/system_gestures.txt` is ignored; existing app-private UI choices are preserved. Without a saved UI choice, suppression remains off.
-- Changing payload mode requires a headset reboot, even if gesture suppression was off; restarting VD alone does not unload the Shell receiver or startup helper.
-- Startup support is restricted to the verified PICO OS 5.13.7 Android-10 fingerprint. Build with JDK 17, Android platform 35 and build-tools 35.0.0; confirm `coldstart.sh status/query` before a hand-mode cold start.
+- Install the full module and reboot the headset. Existing feature settings, custom meshes and saved UI choices are preserved; the former module-level `payload/system_gestures.txt` is ignored. Changing payload mode also requires a headset reboot.
+- Tested with VD 1.34.22.0 on PICO 4 Pro / OS 5.13.7; the contributor confirmed ordinary PICO 4 works. All 104 regression tests, the build and PowerShell 5.1/7 packaging checks passed with no build warnings or errors.
+- Startup support retains explicit enable/disable choices. Build requirements include JDK 17, Android platform 35 and build-tools 35.0.0.
+- Thanks to [misaka18848](https://github.com/misaka18848) for the PICO 4 work in [PR #1](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/1), the UI switch and localization in [PR #2](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/2), and on-device testing.
 
 ## 1.0.8-dev1 — 2026-10-18
 

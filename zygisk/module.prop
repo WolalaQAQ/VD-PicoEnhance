@@ -1,6 +1,6 @@
 id=vdhs_zygisk
 name=VD-PicoEnhance
-version=1.0.8-dev1
-versionCode=10
+version=1.0.8
+versionCode=11
 author=VD-PicoEnhance contributors
 description=Brings PICO optical hand tracking and Quest-style hand passthrough to the unmodified official Virtual Desktop on PICO 4 and PICO 4 Pro, with an eye-gaze pointer fix on supported hardware. Experimental; needs root + Zygisk. Does not modify the APK.

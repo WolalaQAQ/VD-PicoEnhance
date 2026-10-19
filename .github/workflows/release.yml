@@ -65,6 +65,16 @@ jobs:
           foreach ($f in @($zip, $mesh, 'tools/install-vd-picoenhance.ps1', 'LICENSE', 'THIRD_PARTY_NOTICES.md')) {
             Copy-Item -LiteralPath $f -Destination $directory.FullName -Force
           }
+          $sections = foreach ($language in @('', '_zh')) {
+            $label = if ($language) { '简体中文' } else { 'English' }
+            $changelog = (Get-Content -Raw -Encoding UTF8 "CHANGELOG$language.md").Replace("`r`n", "`n")
+            $pattern = '(?ms)^## ' + [regex]::Escape($env:MODULE_VERSION) + ' [^\n]*\n(.*?)(?=^## |\z)'
+            $section = [regex]::Match($changelog, $pattern)
+            if (-not $section.Success) { throw "Missing changelog section for $env:MODULE_VERSION in CHANGELOG$language.md" }
+            "## $label`n`n$($section.Groups[1].Value.Trim())"
+          }
+          $notes = ($sections -join "`n`n") + "`n"
+          [IO.File]::WriteAllText((Join-Path $directory.FullName 'RELEASE_NOTES.md'), $notes, [Text.UTF8Encoding]::new($false))
           Push-Location $directory.FullName
           try {
             $names = Get-ChildItem -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | ForEach-Object { $_.Name } | Sort-Object
@@ -118,6 +128,6 @@ jobs:
           bundle="VD-PicoEnhance-${RELEASE_TAG}.zip"
           test -f "$bundle"
           gh release create "$RELEASE_TAG" \
-            --verify-tag --generate-notes \
+            --verify-tag --notes-file RELEASE_NOTES.md \
             --title "VD-PicoEnhance $RELEASE_TAG" \
             "$bundle"
