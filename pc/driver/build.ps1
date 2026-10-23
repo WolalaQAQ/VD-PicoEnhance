@@ -16,7 +16,11 @@ if (-not $OpenVRHeader) {
         Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/ValveSoftware/openvr/91825305130f446f82054c1ec3d416321ace0072/headers/openvr_driver.h' -OutFile $OpenVRHeader
     }
 }
-if ((Get-FileHash -LiteralPath $OpenVRHeader -Algorithm SHA256).Hash.ToLowerInvariant() -ne $headerSha) { throw 'OpenVR header must match SDK v2.12.14.' }
+# Pin SDK content across GitHub's LF download and Windows CRLF checkouts.
+$headerBytes = [Text.Encoding]::UTF8.GetBytes(([Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($OpenVRHeader))).Replace("`r`n","`n").Replace("`n","`r`n"))
+$sha = [Security.Cryptography.SHA256]::Create()
+try { $actualHeaderSha = [BitConverter]::ToString($sha.ComputeHash($headerBytes)).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
+if ($actualHeaderSha -ne $headerSha) { throw 'OpenVR header must match SDK v2.12.14.' }
 if ([IO.Path]::GetFullPath($OpenVRHeader) -ne (Join-Path $out 'openvr_driver.h')) { Copy-Item -LiteralPath $OpenVRHeader -Destination (Join-Path $out 'openvr_driver.h') -Force }
 $utf8 = [Text.UTF8Encoding]::new($false)
 [IO.File]::WriteAllText((Join-Path $out 'string'), '#pragma once' + "`nnamespace std { class string { public: string(); string(const string &); ~string(); string &operator=(const char *); }; }`n", $utf8)

@@ -21,7 +21,11 @@ if (-not $OpenVRRoot) {
     }
 }
 $header = Join-Path $OpenVRRoot 'headers/openvr_driver.h'
-if ((Get-FileHash -LiteralPath $header -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'e9dc0565e31305023d43a4110ee0bf6e4916e05cb592b3f58e01c80dd41e52aa') { throw 'OpenVR SDK header does not match the pinned version.' }
+# Pin SDK content across GitHub's LF download and Windows CRLF checkouts.
+$headerBytes = [Text.Encoding]::UTF8.GetBytes(([Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($header))).Replace("`r`n","`n").Replace("`n","`r`n"))
+$sha = [Security.Cryptography.SHA256]::Create()
+try { $actualHeaderSha = [BitConverter]::ToString($sha.ComputeHash($headerBytes)).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
+if ($actualHeaderSha -ne 'e9dc0565e31305023d43a4110ee0bf6e4916e05cb592b3f58e01c80dd41e52aa') { throw 'OpenVR SDK header does not match the pinned version.' }
 $env:ZIG = (Resolve-Path -LiteralPath $Zig).Path
 $env:OPENVR_ROOT = (Resolve-Path -LiteralPath $OpenVRRoot).Path
 $env:ANDROID_SDK_ROOT = $SdkRoot
