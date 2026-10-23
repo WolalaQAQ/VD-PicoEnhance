@@ -166,6 +166,10 @@ class NativeBootWorkerTests(unittest.TestCase):
 
 @unittest.skipUnless(SH, 'Git for Windows sh required')
 class BootScriptTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        (Path(tempfile.gettempdir()) / 'opencode').mkdir(exist_ok=True)
+
     def run_coldstart(self, saved, module):
         with tempfile.TemporaryDirectory(prefix='vd-boot-request-', dir=Path(tempfile.gettempdir()) / 'opencode') as tmp:
             root = Path(tmp)

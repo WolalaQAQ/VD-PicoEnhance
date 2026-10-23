@@ -432,7 +432,8 @@ char *strcpy(char*,const char*);
         (OUT / 'local_mock.c').write_text('#include <stdbool.h>\n' + CRT + source +
                                         '\n#include "local_files.h"\n' + MOCK_END + LOOP_MOCK +
                                         '\n#include "serve_source.h"\n' + LOOP_END)
-        llvm = Path.home() / '.cache/pico-android/sdk/ndk/26.1.10909125/toolchains/llvm/prebuilt/windows-x86_64/bin'
+        sdk = Path(os.environ.get('ANDROID_SDK_ROOT', Path.home() / '.cache/pico-android/sdk'))
+        llvm = sdk / 'ndk/26.1.10909125/toolchains/llvm/prebuilt/windows-x86_64/bin'
         dll = OUT / f'local-{os.getpid()}.dll'
         obj = OUT / 'local_mock.obj'
         command = [str(llvm / 'clang.exe'), '--target=x86_64-pc-windows-msvc',
