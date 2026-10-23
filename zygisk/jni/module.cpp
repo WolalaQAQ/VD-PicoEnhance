@@ -17,7 +17,9 @@
 #include <android/log.h>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/stat.h>
+#include <sys/system_properties.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -122,6 +124,79 @@ static void close_staged_fds() {
     }
 }
 
+static void stage_payload(const char* dir, JavaVM* vm) {
+    if (mkdir(dir, 0700) != 0 && errno != EEXIST) {
+        LOGE("mkdir %s: %s", dir, strerror(errno));
+        close_staged_fds();
+        return;
+    }
+
+    int staged = 0;
+    bool stage_ok = true;
+    for (int i = 0; i < g_active_count; i++) {
+        char dst[1200];
+        snprintf(dst, sizeof dst, "%s/%s", dir, base_name(g_active[i].name));
+        if (g_active[i].install_if_missing) {
+            // Install the bundled mesh on first launch; keep a user's own mesh on upgrade.
+            struct stat st;
+            if (lstat(dst, &st) == 0) {
+                if (!S_ISREG(st.st_mode)) {
+                    LOGE("stage: existing mesh is not a regular file: %s", dst);
+                    stage_ok = false;
+                    break;
+                }
+                LOGI("stage: preserving existing %s", dst);
+                continue;
+            }
+            if (errno != ENOENT) {
+                LOGE("stage stat %s: %s", dst, strerror(errno));
+                stage_ok = false;
+                break;
+            }
+        }
+        if (g_active[i].fd < 0) {
+            if (unlink(dst) != 0 && errno != ENOENT) {
+                LOGE("stage remove %s: %s", dst, strerror(errno));
+                stage_ok = false;
+                break;
+            }
+        } else if (copy_fd_to_file(g_active[i].fd, dst)) {
+            staged++;
+        } else {
+            LOGE("stage write %s: %s", dst, strerror(errno));
+            stage_ok = false;
+            break;
+        }
+    }
+    close_staged_fds();
+    if (!stage_ok) { LOGE("payload staging failed; injection skipped"); return; }
+    LOGI("postAppSpecialize: staged %d file(s) into %s", staged, dir);
+
+    char payload[1200];
+    snprintf(payload, sizeof payload, "%s/%s", dir, g_shell ? "libvdhs_shell.so" : "libvdhs.so");
+    void* handle = dlopen(payload, RTLD_NOW | RTLD_GLOBAL);
+    if (!handle) { LOGE("dlopen %s failed: %s", payload, dlerror()); return; }
+
+    typedef int (*PayloadMain)(void*, int);
+    const char* entry_name = g_shell ? "vdhs_shell_main" : "vdhs_payload_main";
+    PayloadMain entry = (PayloadMain)dlsym(handle, entry_name);
+    if (!entry) { LOGE("%s not found in payload", entry_name); return; }
+
+    int rc = entry(vm, g_mode);
+    LOGI("postAppSpecialize: payload started rc=%d mode=%d", rc, g_mode);
+}
+
+static void* shell_loader(void* context) {
+    pthread_setname_np(pthread_self(), "vdhs-shell-boot");
+    char completed[PROP_VALUE_MAX];
+    while (__system_property_get("sys.boot_completed", completed) != 1 || completed[0] != '1') sleep(1);
+    LOGI("boot_completed=1; loading Shell payload");
+    auto* directory = static_cast<char*>(context);
+    stage_payload(directory, nullptr);
+    free(directory);
+    return nullptr;
+}
+
 class VdHsModule : public zygisk::ModuleBase {
 public:
     void onLoad(zygisk::Api* api, JNIEnv* env) override {
@@ -136,29 +211,40 @@ public:
     }
 
     void postServerSpecialize(const zygisk::ServerSpecializeArgs*) override {
-        vd_capability_start(env_);
+        if (!vd_capability_start(env_)) api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
     }
 
     void preAppSpecialize(zygisk::AppSpecializeArgs* args) override {
         g_target = false;
         g_sources_ok = false;
         g_shell = false;
-        if (!args || !args->nice_name) return;
+        if (!args || !args->nice_name) {
+            api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
+            return;
+        }
 
         const char* name = env_->GetStringUTFChars(args->nice_name, nullptr);
         bool match = name && strcmp(name, kTargetProcess) == 0;
         bool shell = name && strcmp(name, kShellProcess) == 0;
         if (name) env_->ReleaseStringUTFChars(args->nice_name, name);
-        if (!match && !shell) return;
+        if (!match && !shell) {
+            api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
+            return;
+        }
 
         int dir = api_->getModuleDir();
-        if (dir < 0) { LOGE("getModuleDir failed"); return; }
+        if (dir < 0) {
+            LOGE("getModuleDir failed");
+            api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
+            return;
+        }
 
         const char* environment_mode = getenv("VDHS_MODE");
         int fallback_mode = environment_mode && *environment_mode ? atoi(environment_mode) : 2;
         g_mode = read_module_setting(dir, "payload/mode.txt", fallback_mode);
         if (shell && !vdhs_shell_requested(g_mode)) {
             close(dir);
+            api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
             return;
         }
         g_target = true;
@@ -209,11 +295,13 @@ public:
         if (!g_sources_ok) {
             LOGE("payload unavailable; injection skipped");
             close_staged_fds();
+            api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
             return;
         }
         if (!args || !args->app_data_dir) {
             LOGE("no app_data_dir");
             close_staged_fds();
+            api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
             return;
         }
 
@@ -221,6 +309,7 @@ public:
         if (!data) {
             LOGE("app_data_dir unavailable");
             close_staged_fds();
+            api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
             return;
         }
         char dir[1024];
@@ -229,71 +318,34 @@ public:
         if (len < 0 || (size_t)len >= sizeof dir) {
             LOGE("app_data_dir path too long");
             close_staged_fds();
+            api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
             return;
         }
 
-        if (mkdir(dir, 0700) != 0 && errno != EEXIST) {
-            LOGE("mkdir %s: %s", dir, strerror(errno));
+        if (g_shell) {
+            char* directory = strdup(dir);
+            int rc = ENOMEM;
+            if (directory) {
+                pthread_t thread;
+                pthread_attr_t attributes;
+                pthread_attr_init(&attributes);
+                pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
+                rc = pthread_create(&thread, &attributes, shell_loader, directory);
+                pthread_attr_destroy(&attributes);
+                if (rc == 0) return; // Worker still executes this module's code; keep it mapped.
+            }
+            free(directory);
             close_staged_fds();
+            LOGE("Cannot start Shell loader (%d); injection skipped", rc);
+            api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
             return;
         }
-
-        int staged = 0;
-        bool stage_ok = true;
-        for (int i = 0; i < g_active_count; i++) {
-            char dst[1200];
-            snprintf(dst, sizeof dst, "%s/%s", dir, base_name(g_active[i].name));
-            if (g_active[i].install_if_missing) {
-                // Install the bundled mesh on first launch; keep a user's own mesh on upgrade.
-                struct stat st;
-                if (lstat(dst, &st) == 0) {
-                    if (!S_ISREG(st.st_mode)) {
-                        LOGE("stage: existing mesh is not a regular file: %s", dst);
-                        stage_ok = false;
-                        break;
-                    }
-                    LOGI("stage: preserving existing %s", dst);
-                    continue;
-                }
-                if (errno != ENOENT) {
-                    LOGE("stage stat %s: %s", dst, strerror(errno));
-                    stage_ok = false;
-                    break;
-                }
-            }
-            if (g_active[i].fd < 0) {
-                if (unlink(dst) != 0 && errno != ENOENT) {
-                    LOGE("stage remove %s: %s", dst, strerror(errno));
-                    stage_ok = false;
-                    break;
-                }
-            } else if (copy_fd_to_file(g_active[i].fd, dst)) {
-                staged++;
-            } else {
-                LOGE("stage write %s: %s", dst, strerror(errno));
-                stage_ok = false;
-                break;
-            }
-        }
-        close_staged_fds();
-        if (!stage_ok) { LOGE("payload staging failed; injection skipped"); return; }
-        LOGI("postAppSpecialize: staged %d file(s) into %s", staged, dir);
-
-        char payload[1200];
-        snprintf(payload, sizeof payload, "%s/%s", dir, g_shell ? "libvdhs_shell.so" : "libvdhs.so");
-        void* handle = dlopen(payload, RTLD_NOW | RTLD_GLOBAL);
-        if (!handle) { LOGE("dlopen %s failed: %s", payload, dlerror()); return; }
-
-        typedef int (*PayloadMain)(void*, int);
-        const char* entry_name = g_shell ? "vdhs_shell_main" : "vdhs_payload_main";
-        PayloadMain entry = (PayloadMain)dlsym(handle, entry_name);
-        if (!entry) { LOGE("%s not found in payload", entry_name); return; }
 
         JavaVM* vm = nullptr;
         env_->GetJavaVM(&vm);
 
-        int rc = entry(vm, g_mode);
-        LOGI("postAppSpecialize: payload started rc=%d mode=%d", rc, g_mode);
+        stage_payload(dir, vm);
+        api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
     }
 
 private:

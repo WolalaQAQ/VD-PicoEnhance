@@ -32,8 +32,9 @@ class ServiceMirrorTests(unittest.TestCase):
         parent.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="vd-service-", dir=parent) as tmp:
             root = Path(tmp)
-            for directory in ("payload", "app", "flags"):
+            for directory in ("payload", "app", "flags", "mixedvr-state"):
                 (root / directory).mkdir()
+            (root / 'mixedvr-state/requested').write_text('0\n')
             for name, value in (("mode.txt", mode), ("system_gestures.txt", setting)):
                 if value is not None:
                     (root / "payload" / name).write_bytes(value)
@@ -45,6 +46,7 @@ class ServiceMirrorTests(unittest.TestCase):
             (root / "property").write_text("stale", encoding="utf-8")
             source = (ROOT / "zygisk/service.sh").read_text(encoding="utf-8")
             source = source.replace("/data/adb/vdhs_zygisk.log", "./service.log")
+            source = source.replace('/data/adb/vdhs_mixedvr/', './mixedvr-state/')
             source = source.replace("/data/data/VirtualDesktop.Android/vdhs/system_gestures.txt",
                                     "./app/system_gestures.txt")
             (root / "service.sh").write_bytes(source.encode("utf-8"))
@@ -59,6 +61,7 @@ class ServiceMirrorTests(unittest.TestCase):
             runner = f"""attempt=0
 tick=0
 date() {{ printf 'test-date'; }}
+getprop() {{ printf '1'; }}
 setprop() {{
     attempt=$((attempt + 1))
     printf '%s=%s\\n' "$1" "$2" >> ./attempts.log
@@ -172,7 +175,8 @@ class ShellPolicyTests(unittest.TestCase):
         gate = source.index("if (shell && !vdhs_shell_requested(")
         stage = source.index("g_active = shell ?")
         self.assertLess(gate, stage)
-        self.assertIn("close(dir);\n            return;", source[gate:stage])
+        self.assertIn("close(dir);", source[gate:stage])
+        self.assertIn("api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);", source[gate:stage])
         self.assertNotIn("com.pico.xr.openxr_runtime", source)
         self.assertIn("vdhs_config_read(stream, fallback)", source)
         payload = (ROOT / "mod/native/vdhs_payload.c").read_text()
@@ -182,7 +186,8 @@ class ShellPolicyTests(unittest.TestCase):
     def test_payload_checks_full_mode(self):
         source = (ROOT / "mod/native/vdhs_shell.c").read_text()
         entry = source[source.index("int vdhs_shell_main("):]
-        self.assertLess(entry.index("if (mode != 2) return 0;"), entry.index("pthread_create("))
+        self.assertLess(entry.index("if (mode != 2) return 0;"), entry.index("shell_thread(NULL)"))
+        self.assertNotIn("pthread_create(", entry)
         self.assertIn("g_original(self, package, state, is_self);", source)
 
     @unittest.skipUnless(os.name == "nt", "freestanding Windows policy executable")

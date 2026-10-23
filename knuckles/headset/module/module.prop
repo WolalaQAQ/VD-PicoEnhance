@@ -1,0 +1,6 @@
+id=pico_mixedvr_standalone
+name=PicoHand<->Knuckles
+version=prototype
+versionCode=15
+author=VD-PicoEnhance contributors
+description=Optional Knuckles and PICO optical hand-tracking auto-switching. Independent LAN control; root required.

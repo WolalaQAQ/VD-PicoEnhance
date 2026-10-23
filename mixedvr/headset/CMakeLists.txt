@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.22)
+project(vdhs_mixedvrd C)
+add_executable(vdhs-mixedvrd mixedvrd.c)
+set_target_properties(vdhs-mixedvrd PROPERTIES C_STANDARD 11)
+target_compile_options(vdhs-mixedvrd PRIVATE -Wall -Wextra -Werror -O2 -g0)
+target_link_options(vdhs-mixedvrd PRIVATE -Wl,--strip-all)
+target_link_libraries(vdhs-mixedvrd PRIVATE log)

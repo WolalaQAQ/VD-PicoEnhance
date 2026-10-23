@@ -56,7 +56,8 @@ try {
         'module.prop', 'customize.sh', 'post-fs-data.sh', 'service.sh',
         'coldstart.sh', 'uninstall.sh', 'capability/classes.dex', 'capability/control.jar',
         'zygisk/arm64-v8a.so', 'payload/libvdhs.so', 'payload/VdHsMod.dll',
-        'payload/mode.txt', 'payload/backend.txt', 'payload/hand_mesh_fb.bin'
+        'payload/mode.txt', 'payload/backend.txt', 'payload/hand_mesh_fb.bin',
+        'mixedvr.sh', 'bin/vdhs-mixedvrd', 'bin/tracking-control.jar'
     )
     foreach ($name in $baseEntries) { Write-Fixture $name ([Text.Encoding]::UTF8.GetBytes($name)) }
     # A module ZIP must not acquire the stage directory or a neighboring file.

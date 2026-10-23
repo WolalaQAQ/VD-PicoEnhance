@@ -52,6 +52,9 @@ namespace VdHsMod
 
                 // 4) Optional: translate the control panel (payload/ui_zh.txt).
                 UiLocalize.Start();
+
+                // 5) Receive MixedVR intent over VD's existing stream. The
+                // selected native executor handles control and recovery.
             }
             catch (Exception ex)
             {

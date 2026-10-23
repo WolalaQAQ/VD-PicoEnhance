@@ -30,8 +30,17 @@ namespace VdHsMod
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate int MarkLoadedFn();
 
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void MixedVrReceiveFn(float amplitude);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate uint MixedVrTickFn(int connected);
+
         private static ActiveInputFn _activeInput;
         private static MarkLoadedFn _markLoaded;
+        private static MixedVrReceiveFn _mixedVrReceive;
+        private static MixedVrTickFn _mixedVrTick;
+        private static MarkLoadedFn _mixedVrInstallSender;
 
         private static bool _broken;
         private static int _lastType = -2;
@@ -56,6 +65,27 @@ namespace VdHsMod
             {
                 ModLog.Warn("NativeBridge.SetPointers failed: " + ex.Message);
             }
+        }
+
+        public static void SetMixedVrPointers(IntPtr receive, IntPtr tick, IntPtr sender)
+        {
+            _mixedVrReceive = (MixedVrReceiveFn)Marshal.GetDelegateForFunctionPointer(receive, typeof(MixedVrReceiveFn));
+            _mixedVrTick = (MixedVrTickFn)Marshal.GetDelegateForFunctionPointer(tick, typeof(MixedVrTickFn));
+            _mixedVrInstallSender = (MarkLoadedFn)Marshal.GetDelegateForFunctionPointer(sender, typeof(MarkLoadedFn));
+        }
+
+        internal static bool MixedVrAvailable => _mixedVrReceive != null && _mixedVrTick != null && _mixedVrInstallSender != null;
+
+        internal static int MixedVrInstallSender() => _mixedVrInstallSender == null ? -1 : _mixedVrInstallSender();
+
+        internal static void MixedVrReceive(float amplitude)
+        {
+            if (_mixedVrReceive != null) _mixedVrReceive(amplitude);
+        }
+
+        internal static uint MixedVrTick(bool connected)
+        {
+            return _mixedVrTick == null ? 0 : _mixedVrTick(connected ? 1 : 0);
         }
 
         /// <summary>

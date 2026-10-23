@@ -15,6 +15,7 @@ int vdhs_hand_gipa_wrap(const char* name, void (**fn)(void));   // 1 = downstrea
 int vdhs_hand_inject_managed(const int32_t* values, int count); // add to XR._supportedExtensions
 int vdhs_hand_fix_permissions(void); // PICO ET/FT not explicitly absent: legacy face gate alias; 0 ok/skipped
 int vdhs_hand_fix_inputtab(void);    // confirmed eye only: InputTab permission -> PICO eye perm; 1 changed
+int vdhs_managed_set_controller_battery(int left, int right); // write only VD's two sbyte fields
 void vdhs_hand_capture_settings(void); // read saved PreferEyeGazeInput; restore requires confirmed eye
 float vdhs_hand_cfg(const char* key);  // hand_gesture.txt value (pt_style, pt_bg_fix, gaze_log, pt_hole, ...)
 // 1 when VD itself would show hand passthrough in SteamVR (cached ~1 s; must

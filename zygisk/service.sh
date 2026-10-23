@@ -23,7 +23,25 @@ read_setting() {
 }
 
 # Full mode supplies the Shell receiver. VD's saved checkbox is its only switch.
-[ "$(read_setting "$MODDIR/payload/mode.txt" 2)" = 2 ] || exit 0
+if [ "$(read_setting "$MODDIR/payload/mode.txt" 2)" != 2 ]; then
+    if [ -f /data/adb/vdhs_mixedvr/pid ] || [ -f /data/adb/vdhs_mixedvr/baseline ]; then
+        sh "$MODDIR/mixedvr.sh" stop >> /data/adb/vdhs_zygisk.log 2>&1
+    fi
+    exit 0
+fi
+
+# Retain the old recovery executable for upgrades, never start the old owner.
+# The optional PicoHand<->Knuckles module has its own lifecycle and state root.
+if [ -d /data/adb/vdhs_mixedvr ]; then
+    sh "$MODDIR/mixedvr.sh" disable >> /data/adb/vdhs_zygisk.log 2>&1
+fi
+
+# The standalone module's migration guard needs the old choice saved first, so
+# only the property mirror below waits for boot completion.
+while [ "$(getprop sys.boot_completed)" != 1 ]; do
+    sleep 1
+done
+echo "vdhs_zygisk: boot_completed=1; gesture mirror starting" >> /data/adb/vdhs_zygisk.log
 
 # Virtual Desktop's Input tab now carries a "Suppress system gestures" switch.
 # The app writes it to its own payload directory; the Shell payload reads the

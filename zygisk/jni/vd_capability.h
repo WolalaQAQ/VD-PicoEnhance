@@ -1,6 +1,6 @@
 #pragma once
 #include <jni.h>
 
-// Module directory access occurs before specialization; no server-main wait.
+// Capture privileged inputs before specialization; bootstrap only after boot.
 void vd_capability_prepare(int module_dir);
-void vd_capability_start(JNIEnv* env);
+bool vd_capability_start(JNIEnv* env);

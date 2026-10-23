@@ -88,6 +88,8 @@ case "$ACTION" in
         ;;
     boot)
         [ -e "$ROOT/requested" ] || exit 0
+        setting=$(read_setting "$ROOT/requested") || fail "invalid boot request"
+        [ "$(read_setting "$MODDIR/vd-capability.txt")" != "$setting" ] || exit 0
         lock_state
         setting=$(read_setting "$ROOT/requested") || fail "invalid boot request"
         atomic_setting "$MODDIR/vd-capability.txt" "$setting"

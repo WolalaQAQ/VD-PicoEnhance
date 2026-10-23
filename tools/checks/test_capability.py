@@ -215,12 +215,15 @@ class CapabilityIntegrationTests(unittest.TestCase):
         self.assertIn('vdhs_config_read(stream, 2)', native)
         self.assertIn('requested = true;', native)
 
-    def test_build_and_recovery_do_not_include_mixedvr(self):
+    def test_capability_declaration_stays_independent_of_optional_mixedvr(self):
         build = (ROOT / 'zygisk/build.ps1').read_text()
         self.assertIn("'coldstart'", build)
         self.assertIn("'capability'", build)
-        self.assertNotIn('mixedvr', build.lower())
-        self.assertNotIn('mixedvr.sh', (ROOT / 'zygisk/uninstall.sh').read_text())
+        service = (ROOT / 'zygisk/service.sh').read_text()
+        self.assertIn('sh "$MODDIR/mixedvr.sh" disable', service)
+        self.assertNotIn('mixedvr.sh" enable', service)
+        self.assertNotIn('mixedvr.sh" start', service)
+        self.assertIn('mixedvr.sh', (ROOT / 'zygisk/uninstall.sh').read_text())
         source = (ROOT / 'zygisk/coldstart.sh').read_text()
         self.assertNotIn('setprop', source)
         self.assertNotIn('sys_tracking_hand_enable', source)

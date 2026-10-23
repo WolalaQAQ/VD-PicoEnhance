@@ -5,7 +5,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/stat.h>
+#include <sys/system_properties.h>
 #include <unistd.h>
 
 namespace {
@@ -85,7 +87,9 @@ void vd_capability_prepare(int directory) {
     if (directory < 0 || !full_mode(directory) ||
         !payload_ready(directory, "payload/libvdhs.so", true) || !payload_ready(directory, "payload/VdHsMod.dll", false)) return;
     char setting[32]; bool missing;
-    if (small_file(directory, "vd-capability.txt", setting, sizeof setting, &missing)) {
+    bool saved = small_file(AT_FDCWD, "/data/adb/vdhs-vd-capability/requested", setting, sizeof setting, &missing);
+    if (!saved && !missing) return;
+    if (saved || small_file(directory, "vd-capability.txt", setting, sizeof setting, &missing)) {
         if (!strcmp(setting, "VDC2 0\n")) requested = false;
         else if (strcmp(setting, "VDC2 1\n")) {
             __android_log_print(ANDROID_LOG_ERROR, kTag, "Invalid VD-only configuration; server helper skipped");
@@ -105,12 +109,11 @@ void vd_capability_prepare(int directory) {
     close(fd);
 }
 
-void vd_capability_start(JNIEnv* env) {
-    if (!env || !dex_bytes || !dex_size) return;
+static void bootstrap(JNIEnv* env) {
     if (env->PushLocalFrame(24) != JNI_OK) { checked(env, "local frame"); free(dex_bytes); dex_bytes = nullptr; return; }
     // Heap ByteBuffer and ClassLoader are retained for the system_server lifetime.
-    // Only boot-framework classes are resolved here; PMS arrives later on Java's
-    // independent worker. This does not wait for services on the boot thread.
+    // Only boot-framework classes are resolved on this attached native worker;
+    // PMS reflection uses its own loader after boot, never the specialize thread.
     auto boot = [&]() -> bool {
         jbyteArray bytes = env->NewByteArray(static_cast<jsize>(dex_size));
         if (!checked(env, "byte array") || !bytes) return false;
@@ -155,4 +158,52 @@ void vd_capability_start(JNIEnv* env) {
     env->PopLocalFrame(nullptr);
     free(dex_bytes); dex_bytes = nullptr; dex_size = 0;
     if (started) __android_log_print(ANDROID_LOG_INFO, kTag, "VD-only declaration worker started; readback still required (requested=%d)", requested);
+}
+
+static bool system_server_started() {
+    // Android 10 sets argv[0] in handleSystemServerProcess after ART's
+    // postForkCommon completes. boot_completed can already be 1
+    // when system_server restarts within the same boot.
+    char name[32] {};
+    int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+    ssize_t count = read(fd, name, sizeof name - 1);
+    close(fd);
+    return count > 0 && !strcmp(name, "system_server");
+}
+
+static void* capability_thread(void* context) {
+    pthread_setname_np(pthread_self(), "vdhs-cap-boot");
+    char completed[PROP_VALUE_MAX];
+    while (__system_property_get("sys.boot_completed", completed) != 1 || completed[0] != '1' ||
+           !system_server_started()) sleep(1);
+    auto* vm = static_cast<JavaVM*>(context);
+    JNIEnv* env = nullptr;
+    if (vm->AttachCurrentThreadAsDaemon(&env, nullptr) == JNI_OK) {
+        __android_log_print(ANDROID_LOG_INFO, kTag, "boot_completed=1; starting VD-only DEX bootstrap");
+        bootstrap(env);
+        vm->DetachCurrentThread();
+    } else {
+        __android_log_print(ANDROID_LOG_ERROR, kTag, "Cannot attach capability worker; helper skipped");
+        free(dex_bytes); dex_bytes = nullptr; dex_size = 0;
+    }
+    return nullptr;
+}
+
+bool vd_capability_start(JNIEnv* env) {
+    if (!env || !dex_bytes || !dex_size) return false;
+    JavaVM* vm = nullptr;
+    int rc = env->GetJavaVM(&vm);
+    if (rc == JNI_OK) {
+        pthread_t thread;
+        pthread_attr_t attributes;
+        pthread_attr_init(&attributes);
+        pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
+        rc = pthread_create(&thread, &attributes, capability_thread, vm);
+        pthread_attr_destroy(&attributes);
+        if (rc == 0) return true;
+    }
+    __android_log_print(ANDROID_LOG_ERROR, kTag, "Cannot start capability worker (%d); helper skipped", rc);
+    free(dex_bytes); dex_bytes = nullptr; dex_size = 0;
+    return false;
 }

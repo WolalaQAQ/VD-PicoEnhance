@@ -30,6 +30,7 @@
 #include <android/log.h>
 
 #include "shadowhook.h"
+#include "vdhs_battery.h"
 #include "vdhs_caps.h"
 #include "vdhs_layer.h"
 
@@ -633,6 +634,7 @@ static XrResult hk_create_instance(const XrInstanceCreateInfo* ci, XrInstance* o
         vdhs_runtime_gipa();
         g_instance = *out;
         vdhs_caps_begin_instance(copy.enabledExtensionCount, names);
+        vdhs_battery_begin_instance(*out, g_orig_gipa);
     }
     LOGI("createInstance: final r=%d instance=0x%llx hand_ext=%d", r,
          (unsigned long long)(r == 0 && out ? *out : 0), has_hand || hand_added);
@@ -1202,6 +1204,7 @@ static XrResult hk_create_action(XrActionSet set, const XrActionCreateInfo* ci, 
         if (g_grip_n < MAX_GRIP) g_grip[g_grip_n++] = *out;
         pthread_mutex_unlock(&g_lock);
         LOGI("createAction: grip_pose=0x%llx", (unsigned long long)*out);
+        vdhs_battery_on_grip_action(set);
     }
     return r;
 }
@@ -1294,6 +1297,7 @@ static int install_hooks(uintptr_t base) {
         }
     }
     if (vdhs_pt_install(base) != 0) LOGE("install: alpha-hole hooks disabled");
+    if (vdhs_battery_install() != 0) LOGE("install: controller battery hooks disabled");
     __atomic_store_n(&g_hooks_ok, 1, __ATOMIC_RELEASE);
     return 0;
 }

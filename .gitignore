@@ -14,6 +14,9 @@ zygisk/payload/VdHsMod.dll
 zygisk/payload/0Harmony.dll
 zygisk/payload/Xenko.OpenXR.patched.dll
 zygisk/zygisk/
+zygisk/bin/
+mixedvr/headset/build-arm64/
+pc/driver/build/
 
 # Generated device data / config pushed at runtime (never commit)
 *.apk

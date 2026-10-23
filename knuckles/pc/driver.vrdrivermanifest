@@ -1,0 +1,8 @@
+{
+  "alwaysActivate": true,
+  "name": "picomixedvr",
+  "directory": "",
+  "resourceOnly": false,
+  "hmd_presence": [],
+  "loadPriority": 1000
+}

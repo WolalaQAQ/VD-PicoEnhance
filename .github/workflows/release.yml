@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build Magisk module
+    name: Build base and optional Knuckles module
     runs-on: windows-latest
     timeout-minutes: 45
     defaults:
@@ -55,42 +55,46 @@ jobs:
           $env:JAVA_HOME = $env:JAVA_HOME_17_X64
           pwsh -NoProfile -File zygisk/build.ps1 -Pack
 
-      - name: Prepare release assets
+      - name: Build portable PC capsule
+        run: pwsh -NoProfile -File pc/driver/build.ps1
+
+      - name: Install pinned Zig and Python build dependency
         run: |
-          $ErrorActionPreference = 'Stop'
-          $zip = 'zygisk/dist/vdhs_zygisk.zip'
-          $mesh = 'assets/mesh/hand_mesh_fb.bin'
-          foreach ($f in @($zip, $mesh)) { if (-not (Test-Path -LiteralPath $f)) { throw "missing build output: $f" } }
-          $directory = New-Item -ItemType Directory -Force -Path artifacts/release
-          foreach ($f in @($zip, $mesh, 'tools/install-vd-picoenhance.ps1', 'LICENSE', 'THIRD_PARTY_NOTICES.md')) {
-            Copy-Item -LiteralPath $f -Destination $directory.FullName -Force
-          }
-          $sections = foreach ($language in @('', '_zh')) {
-            $label = if ($language) { '简体中文' } else { 'English' }
-            $changelog = (Get-Content -Raw -Encoding UTF8 "CHANGELOG$language.md").Replace("`r`n", "`n")
-            $pattern = '(?ms)^## ' + [regex]::Escape($env:MODULE_VERSION) + ' [^\n]*\n(.*?)(?=^## |\z)'
-            $section = [regex]::Match($changelog, $pattern)
-            if (-not $section.Success) { throw "Missing changelog section for $env:MODULE_VERSION in CHANGELOG$language.md" }
-            "## $label`n`n$($section.Groups[1].Value.Trim())"
-          }
-          $notes = ($sections -join "`n`n") + "`n"
-          [IO.File]::WriteAllText((Join-Path $directory.FullName 'RELEASE_NOTES.md'), $notes, [Text.UTF8Encoding]::new($false))
-          Push-Location $directory.FullName
-          try {
-            $names = Get-ChildItem -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | ForEach-Object { $_.Name } | Sort-Object
-            $text = (($names | ForEach-Object {
-              "$((Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant())  $_"
-            }) -join "`n") + "`n"
-            # LF only: the checksum file is consumed by sha256sum on Linux.
-            [IO.File]::WriteAllText((Join-Path $directory.FullName 'SHA256SUMS.txt'), $text, [Text.UTF8Encoding]::new($false))
-            # Extracting the bundle puts the installer and its inputs together.
-            # Its checksum file covers the contents; the external copy also covers the bundle.
-            $bundle = "VD-PicoEnhance-v$env:MODULE_VERSION.zip"
-            Compress-Archive -LiteralPath (@($names) + 'SHA256SUMS.txt') -DestinationPath $bundle
-            $bundleHash = (Get-FileHash -LiteralPath $bundle -Algorithm SHA256).Hash.ToLowerInvariant()
-            [IO.File]::AppendAllText((Join-Path $directory.FullName 'SHA256SUMS.txt'), "$bundleHash  $bundle`n", [Text.UTF8Encoding]::new($false))
-            Get-Content SHA256SUMS.txt
-          } finally { Pop-Location }
+          python -m pip install pefile==2024.8.26
+          if ($LASTEXITCODE) { throw 'Python dependency installation failed.' }
+          $zip = Join-Path $env:RUNNER_TEMP 'zig.zip'
+          Invoke-WebRequest 'https://ziglang.org/download/0.13.0/zig-windows-x86_64-0.13.0.zip' -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'd859994725ef9402381e557c60bb57497215682e355204d754ee3df75ee3c158') { throw 'Zig archive differs from the pinned release.' }
+          Expand-Archive -LiteralPath $zip -DestinationPath $env:RUNNER_TEMP
+          "ZIG=$env:RUNNER_TEMP/zig-windows-x86_64-0.13.0/zig.exe" >> $env:GITHUB_ENV
+
+      - name: Build optional provider and headset daemon
+        run: |
+          $env:JAVA_HOME = $env:JAVA_HOME_17_X64
+          pwsh -NoProfile -File knuckles/build.ps1 -Zig $env:ZIG
+          if ($LASTEXITCODE) { throw 'Optional module build failed.' }
+
+      - name: Check source and distributable boundaries
+        run: |
+          $env:JAVA_HOME = $env:JAVA_HOME_17_X64
+          python -B -X utf8 -m unittest discover -s tools/checks -p 'test_*.py' -v
+          if ($LASTEXITCODE) { throw 'Source regression failed.' }
+          python -B -X utf8 -m unittest discover -s mod/native/checks -p 'test_*.py' -v
+          if ($LASTEXITCODE) { throw 'Native capability regression failed.' }
+          pwsh -NoProfile -File tools/checks/test-pack-module.ps1
+          if ($LASTEXITCODE) { throw 'Module ZIP check failed.' }
+          pwsh -NoProfile -File tools/checks/test-pc-package.ps1 -PackagePath pc/driver/build
+          if ($LASTEXITCODE) { throw 'PC capsule check failed.' }
+          pwsh -NoProfile -File tools/checks/test-knuckles-manager.ps1
+          if ($LASTEXITCODE) { throw 'Optional Knuckles manager check failed.' }
+          pwsh -NoProfile -File tools/checks/test-unified-installer.ps1 -InstallerPath tools/install-vd-picoenhance.ps1
+          if ($LASTEXITCODE) { throw 'Unified installer check failed.' }
+
+      - name: Prepare release assets
+        run: pwsh -NoProfile -File tools/pack-release.ps1
+
+      - name: Verify complete release bundle
+        run: pwsh -NoProfile -File tools/checks/test-release-package.ps1 -BundlePath "artifacts/release/VD-PicoEnhance-v${{ env.MODULE_VERSION }}.zip"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -127,7 +131,10 @@ jobs:
           sha256sum --check --strict SHA256SUMS.txt
           bundle="VD-PicoEnhance-${RELEASE_TAG}.zip"
           test -f "$bundle"
+          flags=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then flags+=(--prerelease); fi
           gh release create "$RELEASE_TAG" \
             --verify-tag --notes-file RELEASE_NOTES.md \
             --title "VD-PicoEnhance $RELEASE_TAG" \
+            "${flags[@]}" \
             "$bundle"

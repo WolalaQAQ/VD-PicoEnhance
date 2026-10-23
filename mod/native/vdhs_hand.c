@@ -217,8 +217,14 @@ static PFN_create_ht  g_next_create_ht;
 static PFN_destroy_ht g_next_destroy_ht;
 static PFN_locate_hj  g_next_locate_hj;
 
+#ifdef VDHS_SESSION_LOCAL
+#include "mixedvr-session/session_local.h"
+#endif
 static XrResult w_create_ht(XrHandle session, const XrHandTrackerCreateInfoEXT* ci, XrHandle* out) {
     XrResult r = g_next_create_ht(session, ci, out);
+#ifdef VDHS_SESSION_LOCAL
+    session_local_observe_create(session, ci ? ci->hand : 0, r >= 0 && out ? *out : 0, r);
+#endif
     if (r == 0 && ci && out) {
         pthread_mutex_lock(&g_ht_lock);
         int slot = -1;
@@ -235,6 +241,9 @@ static XrResult w_create_ht(XrHandle session, const XrHandTrackerCreateInfoEXT* 
 
 static XrResult w_destroy_ht(XrHandle h) {
     XrResult r = g_next_destroy_ht(h);
+#ifdef VDHS_SESSION_LOCAL
+    session_local_observe_destroy(h, r);
+#endif
     pthread_mutex_lock(&g_ht_lock);
     for (int i = 0; i < MAX_HT; i++) if (g_ht[i].h == h) { g_ht[i].h = 0; g_ht[i].hand = 0; g_ht[i].session = 0; }
     pthread_mutex_unlock(&g_ht_lock);
@@ -1052,12 +1061,22 @@ static struct {
     MP (*property_get_get_method)(MP);
     MP (*property_get_set_method)(MP);
 } M;
-// Optional (pt_follow_settings only): a missing symbol must not disable the
-// permission / extension fixes that depend on M.
+// Optional APIs: resolve each feature's subset independently so a missing
+// symbol does not disable the permission / extension fixes that depend on M.
 static struct {
     void (*field_get_value)(MP, MP, void*);
     uintptr_t (*array_length)(MP);
     char* (*array_addr_with_size)(MP, int, uintptr_t);
+    uint32_t (*field_get_offset)(MP);
+    MP (*field_get_type)(MP);
+    uint32_t (*field_get_flags)(MP);
+    MP (*class_from_mono_type)(MP);
+    int (*class_is_valuetype)(MP);
+    int32_t (*class_value_size)(MP, uint32_t*);
+    int32_t (*class_instance_size)(MP);
+    int (*type_get_type)(MP);
+    void* (*enter_gc_unsafe_region)(void**);
+    void (*exit_gc_unsafe_region)(void*, void**);
 } MX;
 
 static int mono_resolve(void) {
@@ -1094,6 +1113,125 @@ static MP find_image(const char* name) {
     MP img = M.image_loaded(name);
     if (!img) { g_found_image = NULL; M.assembly_foreach(find_image_cb, (MP)name); img = g_found_image; }
     return img;
+}
+
+// ---------------------------------------------------------------- controller battery
+static int battery_mono_resolve(void) {
+    static int state;
+    if (state) return state > 0;
+    static const char* const names[] = {
+        "mono_field_get_offset", "mono_field_get_type", "mono_field_get_flags",
+        "mono_class_from_mono_type", "mono_class_is_valuetype", "mono_class_value_size",
+        "mono_class_instance_size", "mono_type_get_type",
+        "mono_threads_enter_gc_unsafe_region", "mono_threads_exit_gc_unsafe_region",
+    };
+    _Static_assert(sizeof names / sizeof names[0] ==
+                   (sizeof MX - offsetof(__typeof__(MX), field_get_offset)) / sizeof(void*), "battery API slots");
+    void** slots = (void**)&MX.field_get_offset;
+    int ok = 1;
+    for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
+        slots[i] = vdhs_resolve_mapped_symbol("libmonosgen-2.0.so", names[i]);
+        if (!slots[i]) { LOGE("battery: %s not found", names[i]); ok = 0; }
+    }
+    state = ok ? 1 : -1;
+    return ok;
+}
+
+static struct {
+    int state;
+    MP input_class, game_field, game_class;   // Metadata only, never a Game object.
+    uint32_t left_offset, right_offset;
+} g_battery_layout;
+
+// Mono reports value-type fields relative to a boxed object, including its
+// two-pointer MonoObject header. Embedded values have no such header. Game's
+// reference-type _frameData offset, in contrast, is already object-relative.
+static int battery_field_offset(MP owner, const char* name, MP value_class,
+                                int32_t owner_size, int32_t value_size, int boxed,
+                                uint32_t* out) {
+    MP f = M.class_get_field_from_name(owner, name);
+    MP type = f ? MX.field_get_type(f) : NULL;
+    if (!type || (MX.field_get_flags(f) & (0x10u | 0x40u))) return 0; // static / literal
+    if (value_class) {
+        if (MX.class_from_mono_type(type) != value_class) return 0;
+    } else if (MX.type_get_type(type) != 0x04) return 0; // MONO_TYPE_I1 (System.SByte)
+    uint32_t header = 2 * sizeof(void*);
+    uint32_t offset = MX.field_get_offset(f);
+    if (offset < header) return 0;
+    if (boxed) offset -= header;
+    if (value_size <= 0 || owner_size < value_size || offset > (uint32_t)(owner_size - value_size)) return 0;
+    *out = offset;
+    return 1;
+}
+
+static int battery_layout_init(void) {
+    if (g_battery_layout.state) return g_battery_layout.state;
+    MP mob = find_image("VirtualDesktop.Mobile");
+    MP shared = find_image("VirtualDesktop.Mobile.Shared");
+    MP interfaces = find_image("VirtualDesktop.Interfaces");
+    if (!mob || !shared || !interfaces) return 0;
+
+    g_battery_layout.state = -1;
+    MP input = M.class_from_name(mob, "VirtualDesktop.Mobile", "InputManager");
+    MP game = M.class_from_name(mob, "VirtualDesktop.Mobile", "Game");
+    MP frame = M.class_from_name(shared, "VirtualDesktop.Mobile", "FrameData");
+    MP device = M.class_from_name(interfaces, "VirtualDesktop.Interfaces", "DeviceState");
+    MP pose = M.class_from_name(interfaces, "VirtualDesktop.Interfaces", "ControllerPose");
+    if (!input || !game || !frame || !device || !pose || MX.class_is_valuetype(input) ||
+        MX.class_is_valuetype(game) || !MX.class_is_valuetype(frame) ||
+        !MX.class_is_valuetype(device) || !MX.class_is_valuetype(pose)) return -1;
+    MP game_field = M.class_get_field_from_name(input, "_game");
+    MP game_type = game_field ? MX.field_get_type(game_field) : NULL;
+    if (!game_type || (MX.field_get_flags(game_field) & (0x10u | 0x40u)) != 0x10u ||
+        MX.class_from_mono_type(game_type) != game) return -1;
+
+    uint32_t align;
+    int32_t game_size = MX.class_instance_size(game);
+    int32_t frame_size = MX.class_value_size(frame, &align);
+    int32_t device_size = MX.class_value_size(device, &align);
+    int32_t pose_size = MX.class_value_size(pose, &align);
+    uint32_t f, d, l, r, b;
+    if (!battery_field_offset(game, "_frameData", frame, game_size, frame_size, 0, &f) ||
+        !battery_field_offset(frame, "DeviceState", device, frame_size, device_size, 1, &d) ||
+        !battery_field_offset(device, "LeftControllerPose", pose, device_size, pose_size, 1, &l) ||
+        !battery_field_offset(device, "RightControllerPose", pose, device_size, pose_size, 1, &r) ||
+        !battery_field_offset(pose, "BatteryPercentage", NULL, pose_size, 1, 1, &b)) return -1;
+    if (!(l + (uint32_t)pose_size <= r || r + (uint32_t)pose_size <= l)) return -1;
+
+    g_battery_layout.input_class = input;
+    g_battery_layout.game_field = game_field;
+    g_battery_layout.game_class = game;
+    g_battery_layout.left_offset = f + d + l + b;
+    g_battery_layout.right_offset = f + d + r + b;
+    g_battery_layout.state = 1;
+    return 1;
+}
+
+// Called after successful xrSyncActions on VD's Mono-attached game thread.
+// The caller supplies the transport battery codes. Only these bytes are ours:
+// copying FrameData back would overwrite concurrent poses.
+int vdhs_managed_set_controller_battery(int left, int right) {
+    if (!mono_resolve() || !battery_mono_resolve()) return -1;
+    void* stack_marker = NULL;
+    void* cookie = MX.enter_gc_unsafe_region(&stack_marker);
+    int rc = battery_layout_init();
+    if (rc > 0) {
+        rc = 0;
+        MP domain = M.domain_get();
+        MP vt = domain ? M.class_vtable(domain, g_battery_layout.input_class) : NULL;
+        MP game = NULL;
+        if (vt) M.field_static_get_value(vt, g_battery_layout.game_field, &game);
+        if (game) {
+            if (M.object_get_class(game) != g_battery_layout.game_class) rc = -1;
+            else {
+                __atomic_store_n((int8_t*)game + g_battery_layout.left_offset, (int8_t)left, __ATOMIC_RELAXED);
+                __atomic_store_n((int8_t*)game + g_battery_layout.right_offset, (int8_t)right, __ATOMIC_RELAXED);
+                rc = 1;
+            }
+        }
+    }
+    MX.exit_gc_unsafe_region(cookie, &stack_marker);
+    return rc;
 }
 
 static void log_exc(const char* what, MP exc) {

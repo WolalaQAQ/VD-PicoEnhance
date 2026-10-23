@@ -29,6 +29,9 @@
 #include "vdhs_layer.h"
 #include "vdhs_sym.h"
 #include "vdhs_config.h"
+#ifdef VDHS_LEGACY_MIXEDVR
+#include "vdhs_mixedvr.h"
+#endif
 
 #define TAG "vdhs-zygisk"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -325,6 +328,18 @@ static void* mono_waiter(void* arg) {
         } else {
             LOGE("payload: %s.NativeBridge.SetPointers(intptr,intptr) not found", kModClassNamespace);
         }
+#ifdef VDHS_LEGACY_MIXEDVR
+        MonoMethod* set_mixedvr = bridge ? api.class_get_method_from_name(bridge, "SetMixedVrPointers", 3) : NULL;
+        if (set_mixedvr) {
+            void* receive = (void*)(uintptr_t)&vdhs_mixedvr_receive;
+            void* tick = (void*)(uintptr_t)&vdhs_mixedvr_tick;
+            void* sender = (void*)(uintptr_t)&vdhs_mixedvr_install_sender;
+            void* argv[3] = { &receive, &tick, &sender };
+            MonoObject* error = NULL;
+            api.runtime_invoke(set_mixedvr, NULL, argv, &error);
+            if (error) log_managed_exception(&api, error);
+        }
+#endif
     }
 
     MonoObject* exc = NULL;

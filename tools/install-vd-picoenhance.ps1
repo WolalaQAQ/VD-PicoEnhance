@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    One-shot installer for the VD-PicoEnhance Magisk module and its hand mesh.
+    Install or manage VD-PicoEnhance on the headset and Windows PC.
 
 .DESCRIPTION
     Uses the module ZIP and hand mesh beside this script, pushes them to a
@@ -12,9 +12,19 @@
     Keep this script, vdhs_zygisk.zip and hand_mesh_fb.bin together. This script
     never downloads files; missing files cause an error before any device changes.
 
-    Requirements: a rooted PICO 4 or PICO 4 Pro (Magisk with Zygisk), Virtual Desktop
-    Android 1.34.22.0 installed, and adb available (on PATH, or via -Adb, or
-    under $env:ANDROID_HOME / $env:ANDROID_SDK_ROOT).
+    Installs the local PC patch, headset module and mesh before reboot.
+    The base PC patch supplies battery properties only. -WithKnuckles also
+    installs the independent optional provider and LAN daemon. Saved choices remain.
+
+.PARAMETER Action
+    Install (default), Configure connection, Enable or Disable switching, Status,
+    or Uninstall. ADB is used for installation and persistent headset management.
+
+.PARAMETER DriverPath
+    Complete path to the VD Streamer driver when not in the standard location.
+
+.PARAMETER HeadsetOnly
+    Advanced headset-only installation, for isolated module verification.
 
 .PARAMETER ZipPath
     Local Magisk module ZIP. Defaults to vdhs_zygisk.zip beside this script.
@@ -44,12 +54,18 @@
 #>
 [CmdletBinding()]
 param(
+    [ValidateSet('Install','Configure','Enable','Disable','Status','Uninstall','UninstallKnuckles')][string]$Action = 'Install',
     [string]$ZipPath,
     [string]$MeshPath,
     [string]$Adb,
     [string]$Serial,
+    [string]$DriverPath = (Join-Path $env:ProgramFiles 'Virtual Desktop Streamer/OpenVRDriver/bin/win64/driver_VirtualDesktop.dll'),
     [ValidateSet(1, 2)][int]$Mode = 2,
-    [switch]$NoReboot
+    [switch]$NoReboot,
+    [switch]$HeadsetOnly,
+    [switch]$WithKnuckles,
+    [string]$HeadsetAddress,
+    [string]$PcAddress
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,6 +74,14 @@ $AppId = 'VirtualDesktop.Android'
 $ModuleId = 'vdhs_zygisk'
 $AppDir = "/data/data/$AppId"
 $ReplaceMesh = if ($PSBoundParameters.ContainsKey('MeshPath')) { 1 } else { 0 }
+$pcPackage = Join-Path $PSScriptRoot 'pc'
+$pcInstaller = Join-Path $pcPackage 'install.ps1'
+$pcManager = Join-Path $PSScriptRoot 'knuckles/manage.ps1'
+$installPC = -not $HeadsetOnly -and $Mode -eq 2
+$optionalReceipt = Join-Path $env:LOCALAPPDATA 'PicoMixedVR/installation.json'
+$hasKnuckles = (Test-Path -LiteralPath $optionalReceipt) -and (Get-Content -LiteralPath $optionalReceipt -Raw | ConvertFrom-Json).installed
+$installKnuckles = $installPC -and ($WithKnuckles -or $hasKnuckles)
+if ($WithKnuckles -and -not $installPC) { throw '-WithKnuckles requires a full PC and headset installation.' }
 
 function Write-Step { param([string]$Message) Write-Host "==> $Message" -ForegroundColor Cyan }
 function Write-Ok { param([string]$Message) Write-Host "    $Message" -ForegroundColor Green }
@@ -72,20 +96,66 @@ function Invoke-Adb {
     $output
 }
 
+function Invoke-PC([string]$Operation) {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        & $pcInstaller -Action $Operation -DriverPath $DriverPath -PackagePath $pcPackage
+    } else {
+        $hostPath = (Get-Command powershell.exe).Source
+        $arguments = @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$pcInstaller+'"'),'-Action',$Operation,'-DriverPath',('"'+$DriverPath+'"'),'-PackagePath',('"'+$pcPackage+'"'))
+        $process = Start-Process -FilePath $hostPath -ArgumentList $arguments -Verb RunAs -Wait -PassThru
+        if ($process.ExitCode -ne 0) { throw "PC $Operation failed (exit code $($process.ExitCode))." }
+    }
+}
+
+if ($Action -eq 'Status') {
+    & $pcManager -Action Status
+    if (Test-Path -LiteralPath $DriverPath) { & $pcInstaller -Action Status -DriverPath $DriverPath }
+    return
+}
+if ($Action -eq 'Disable' -or $Action -eq 'Enable') {
+    & $pcManager -Action $Action -Adb $Adb -Serial $Serial
+    return
+}
+if ($Action -eq 'Configure') {
+    & $pcManager -Action Configure -Adb $Adb -Serial $Serial -HeadsetAddress $HeadsetAddress -PcAddress $PcAddress
+    return
+}
+if ($Action -eq 'UninstallKnuckles') {
+    & $pcManager -Action Uninstall -Adb $Adb -Serial $Serial
+    return
+}
+if ($installPC) {
+    foreach ($file in @($pcInstaller,(Join-Path $pcPackage 'vd-picoenhance.pe'),(Join-Path $pcPackage 'capsule.json'))) {
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw 'PC payload missing. Extract the complete release bundle before installing.' }
+    }
+    if (Get-Process -Name vrserver -ErrorAction SilentlyContinue) { throw 'Exit SteamVR before installing or uninstalling. No files were changed.' }
+    $status = & $pcInstaller -Action Status -DriverPath $DriverPath
+    if (-not $status.official -and -not $status.owned_patch) { throw 'Unsupported VD Streamer driver. No files were changed.' }
+}
+if ($installKnuckles -and $Action -eq 'Install') {
+    foreach ($file in @($pcManager,(Join-Path $PSScriptRoot 'knuckles/PicoHand-Knuckles.zip'),(Join-Path $PSScriptRoot 'knuckles/pc/driver_picomixedvr/bin/win64/driver_picomixedvr.dll'))) {
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw 'Optional Knuckles package missing. No files were changed.' }
+    }
+}
+
 # --- locate the local module and mesh ---------------------------------------
-Write-Step 'Looking for the local module and hand mesh'
-if (-not $ZipPath) { $ZipPath = Join-Path $PSScriptRoot 'vdhs_zygisk.zip' }
-if (-not $MeshPath) { $MeshPath = Join-Path $PSScriptRoot 'hand_mesh_fb.bin' }
-if (-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)) {
-    throw "Module ZIP not found: $ZipPath. Keep vdhs_zygisk.zip from the same release beside this script, or pass -ZipPath. No files will be downloaded."
+if ($Action -eq 'Install') {
+    Write-Step 'Looking for the local module and hand mesh'
+    if (-not $ZipPath) { $ZipPath = Join-Path $PSScriptRoot 'vdhs_zygisk.zip' }
+    if (-not $MeshPath) { $MeshPath = Join-Path $PSScriptRoot 'hand_mesh_fb.bin' }
+    if (-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)) {
+        throw "Module ZIP not found: $ZipPath. Keep vdhs_zygisk.zip from the same release beside this script, or pass -ZipPath. No files will be downloaded."
+    }
+    if (-not (Test-Path -LiteralPath $MeshPath -PathType Leaf)) {
+        throw "Hand mesh not found: $MeshPath. Keep hand_mesh_fb.bin from the same release beside this script, or pass -MeshPath. No files will be downloaded."
+    }
+    $ZipPath = (Resolve-Path -LiteralPath $ZipPath).ProviderPath
+    $MeshPath = (Resolve-Path -LiteralPath $MeshPath).ProviderPath
+    Write-Ok "module: $ZipPath"
+    Write-Ok "mesh: $MeshPath"
 }
-if (-not (Test-Path -LiteralPath $MeshPath -PathType Leaf)) {
-    throw "Hand mesh not found: $MeshPath. Keep hand_mesh_fb.bin from the same release beside this script, or pass -MeshPath. No files will be downloaded."
-}
-$ZipPath = (Resolve-Path -LiteralPath $ZipPath).ProviderPath
-$MeshPath = (Resolve-Path -LiteralPath $MeshPath).ProviderPath
-Write-Ok "module: $ZipPath"
-Write-Ok "mesh: $MeshPath"
 
 # --- locate adb -------------------------------------------------------------
 if (-not $Adb) {
@@ -103,6 +173,7 @@ if (-not $Adb) {
 if (-not $Adb -or -not (Test-Path -LiteralPath $Adb)) {
     throw 'adb not found. Install Android platform-tools, put adb on PATH, or pass -Adb <path>.'
 }
+$Adb = (Resolve-Path -LiteralPath $Adb).ProviderPath
 Write-Ok "adb: $Adb"
 
 # --- find the headset -------------------------------------------------------
@@ -127,6 +198,19 @@ if ($id -notmatch 'uid=0') {
     throw "Root is required and 'su' did not return uid=0. Enable Magisk and grant shell root."
 }
 Write-Ok 'root ok'
+
+if ($Action -eq 'Uninstall') {
+    if ($hasKnuckles -and -not $HeadsetOnly) { & $pcManager -Action Uninstall -Adb $Adb -Serial $Serial }
+    if ($installPC) { Invoke-PC 'Uninstall' }
+    Invoke-Adb -Arguments @('-s', $Serial, 'shell', "su -c 'touch /data/adb/modules/vdhs_zygisk/remove'") | Out-Null
+    if (-not $NoReboot) { Invoke-Adb -Arguments @('-s', $Serial, 'reboot') | Out-Null }
+    Write-Ok 'PC original restored and headset module marked for removal on reboot. Pairing and original backup retained.'
+    return
+}
+if ($installPC) {
+    Write-Step 'Installing the VD PC patch (approve the Windows permission prompt if shown)'
+    Invoke-PC 'Install'
+}
 
 # --- push -------------------------------------------------------------------
 Write-Step 'Pushing files to the headset'
@@ -158,6 +242,11 @@ $remote = 'set -e; d=' + $AppDir + '; owner=$(stat -c %u:%g $d); mkdir -p $d/vdh
           'restorecon -RFD $d/vdhs; ls -l $d/vdhs/hand_mesh_fb.bin'
 Invoke-Adb -Arguments @('-s', $Serial, 'shell', "su -c '$remote'")
 
+if ($installKnuckles) {
+    Write-Step 'Installing optional PicoHand<->Knuckles and its private LAN pairing'
+    & $pcManager -Action Install -Adb $Adb -Serial $Serial -HeadsetAddress $HeadsetAddress -PcAddress $PcAddress
+}
+
 # --- reboot -----------------------------------------------------------------
 if ($NoReboot) {
     Write-Step 'Skipping the reboot (-NoReboot). The module applies on the next boot.'
@@ -170,4 +259,14 @@ if ($NoReboot) {
 Write-Host ''
 Write-Host 'Done.' -ForegroundColor Green
 Write-Host 'After boot: on supported PICO firmware, the module declares VD hand-mode startup support.' -ForegroundColor Gray
-Write-Host 'Check coldstart.sh status/query before testing a hand-mode cold start; the APK is unchanged.' -ForegroundColor Gray
+if ($installPC) {
+    Write-Host 'PICO controller battery support is installed.' -ForegroundColor Gray
+    if ($installKnuckles) {
+        Write-Host 'PicoHand<->Knuckles is selected; SteamVR loads its independent provider automatically.' -ForegroundColor Gray
+        Write-Host 'Daily switching uses the paired LAN connection, not ADB or VD frames. Existing Stop/Disable choices are retained.' -ForegroundColor Gray
+    } else {
+        Write-Host 'PicoHand<->Knuckles was not selected; no optional provider or LAN daemon was installed.' -ForegroundColor Gray
+    }
+} else {
+    Write-Host 'Headset-only installation complete; PC files and pairing were not changed.' -ForegroundColor Gray
+}

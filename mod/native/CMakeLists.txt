@@ -27,7 +27,7 @@ target_include_directories(shadowhook_static
             ${SH_DIR}/third_party/xdl ${SH_DIR}/third_party/bsd ${SH_DIR}/third_party/lss
     PUBLIC  ${SH_DIR}/include)
 
-add_library(vdhs SHARED vdhs_mark.c vdhs_payload.c vdhs_layer.c vdhs_hand.c vdhs_pt.c vdhs_caps.c vdhs_sym.c)
+add_library(vdhs SHARED vdhs_mark.c vdhs_payload.c vdhs_layer.c vdhs_hand.c vdhs_pt.c vdhs_caps.c vdhs_sym.c vdhs_battery.c)
 set_target_properties(vdhs PROPERTIES
     OUTPUT_NAME "vdhs"
     PREFIX "lib"

@@ -21,7 +21,8 @@ Magisk / Zygisk
                │     ├─ vdhs_layer.c  inline hooks on VD's bundled libopenxr_loader.so
                │     ├─ vdhs_hand.c   hand tracking, aim/mesh, managed extension list
                │     ├─ vdhs_pt.c     zero-copy hand-passthrough hole
-               │     └─ vdhs_mark.c   xrMarkApiClass reach-through (PICO runtime)
+               │     ├─ vdhs_mark.c   xrMarkApiClass reach-through (PICO runtime)
+               │     └─ vdhs_battery.c controller-battery input
                └─ VdHsMod.dll         managed mod (netstandard2.0, reflection only)
                      └─ VdHsMod.Loader.Start()
 ```
@@ -47,6 +48,9 @@ The Shell hook suppresses gestures only for focused VD with the exact value `1`;
 missing or invalid state is off, and other applications keep their original path.
 No module-level gesture setting or managed environment gate is used. Install and
 reboot once to load the receiver; subsequent UI changes need no restart.
+At Shell process start the injector keeps only the payload descriptor. A
+background thread waits for `sys.boot_completed=1`, then stages the payload and
+installs the hook; the gesture-state mirror also starts after boot completion.
 The hook is not installed in the OpenXR runtime service. Its private libc++
 layout is checked against the Shell's known streaming-app entry before hooking.
 The in-app gesture switch is independent of the startup capability helper.
@@ -54,10 +58,12 @@ The in-app gesture switch is independent of the startup capability helper.
 ### VD-only system launch capability
 
 `coldstart/java/org/vdpico/capability/` is the existing Android-10 metadata
-helper. Zygisk's server callbacks prepare its separate DEX and load it with
-`InMemoryDexClassLoader`; no VD, OpenXR or Mono payload is loaded into
-system_server. Startup returns after launching its worker threads rather than
-waiting for PackageManager on the server's boot thread.
+helper. Before specialization, Zygisk's server callback reads the saved choice
+and the separate DEX; the server's boot thread only starts a native worker and
+returns. After `sys.boot_completed=1` that worker attaches to the VM, loads the
+DEX with `InMemoryDexClassLoader` and starts the helper threads. No VD, OpenXR or
+Mono payload is loaded into system_server. The post-fs-data script does nothing,
+so boot performs no setting rewrite or `sync`.
 
 On the verified PICO 4 Pro / OS 5.13.7 fingerprint, full mode enables the helper
 by default, unless an explicitly saved disable choice exists. It copies VD's
@@ -67,7 +73,8 @@ original type/value without replacing later edits to other keys; external
 ownership conflicts are preserved. A replacement VD package gets a new baseline.
 The fixed root-only socket and `coldstart.sh` expose status, independent query,
 enable and disable. No global hand-tracking property or runtime event hook is
-changed, and this build contains no Index/MixedVR companion or PC selector.
+changed by this helper. PicoHand<->Knuckles below does not
+run inside system_server and does not share this startup declaration.
 
 `vdhs_caps.c` separates the firmware's `ro.pxr.eyetracking.support` ET/FT hint
 from the runtime's enabled `XR_EXT_eye_gaze_interaction` system support result.
@@ -181,13 +188,159 @@ settings enabled, logs showed pointer processing `1/1` and head-relative
 processing `0/0` on both the streaming and render threads. The user reported
 normal foveated-region following and menu-pointer behaviour.
 
-## 4. Managed mod
+## 4. Controller battery and PicoHand<->Knuckles
+
+`vdhs_battery.c` adds a left/right float input action to VD's existing controller
+action set. Its optional loader hooks append battery bindings to VD's PICO
+interaction-profile suggestion and sample after `xrSyncActions`. A rejected
+battery binding leaves VD's original input bindings intact.
+
+Samples are cached for one second. The native Mono helper in `vdhs_hand.c`
+resolves the nested `Game._frameData.DeviceState` controller-battery offsets
+from metadata, obtains the current Game object inside a balanced GC-unsafe
+region, and writes only the two signed bytes. It does not retain a movable
+object pointer or replace a frame containing concurrently updated poses.
+VD's serializer, compression and PC transport remain unchanged.
+
+An inactive or failed battery action yields unavailable readings, not zero.
+Unavailable Mono metadata skips the battery write without changing the original
+Sync return or controller input. The PC patch supplies the corresponding
+SteamVR properties on VD's existing physical-controller containers, retaining the
+last known percentage while temporarily withdrawing battery availability.
+
+### 4.1 Battery-only PC capsule
+
+`pc/driver/src/` builds a freestanding x64 capsule containing only this project's
+code. `NativePatch.cs` verifies the supported VD original, appends RX code and RW
+state sections, and merges unwind/relocation records locally. It changes a single
+provider slot, RunFrame, to publish battery. The original Init and Cleanup and the
+original controller-creation and update paths are left as they were. Original
+tracker/input handlers still run; no second SteamVR driver or device is
+registered. The capsule carries battery publication only and has no
+hand-switching code. It contains no original VD tables or complete VD image, and
+no VD DLL, original or patched, is distributed. Installation keeps the exact
+original and a receipt beside it.
+
+### 4.2 PicoHand<->Knuckles
+
+PicoHand<->Knuckles is optional and runs independently of VD and the base
+module. Two components talk directly over the local network:
+
+```
+SteamVR ── driver_picomixedvr (PC)  ──LAN──▶  headset daemon (root)
+             samples Index input                applies / restores the
+             decides pickup / putdown           system hand-tracking setting
+```
+
+Sources are in `knuckles/pc/`, `knuckles/headset/` and `knuckles/capture/`.
+Some internal identifiers, such as the driver name `picomixedvr` and the
+headset state root, keep their earlier names so that installed state stays
+valid across upgrades; users do not manage them.
+
+**PC driver.** An ordinary SteamVR driver with no virtual device. From the
+driver context it samples the trackpad touch of real Lighthouse Index
+controllers through the public input interface, together with the same device's
+pose. The capture source in `knuckles/capture/` is compiled into the same
+`driver_picomixedvr.dll`; there is no second capture plugin. It reads the public
+DriverInput003/004/005 Boolean Create/Update prefixes, deduplicating shared tables,
+and involves no Virtual Desktop addresses or code. The
+driver needs no ADB, VD frame or resident PC application, and starts and stops
+with SteamVR.
+
+Policy:
+
+- Pickup needs trackpad touch and valid motion on the same real controller.
+  Touch from one controller and motion from the other do not combine.
+- Putdown needs every present Index controller to be explicitly released and
+  stationary for 1000ms. A controller that is connected with unknown touch or
+  lost tracking is not released.
+- Losing all verified sources restores the original state and returns to
+  standby; it never synthesizes a release.
+- With no Index controllers the driver only requests daemon status. It writes no
+  hand-tracking preference and no system setting.
+- The preference that gives hands priority is applied only after a real input
+  decision and a successful status exchange, and is restored to its original
+  value on exit.
+
+**Headset daemon.** A root service in its own Magisk module with its own state
+directory. It listens on the headset's current private wlan0 address. The saved
+paired PC address remains valid; a paired discovery request also grants a new
+same-subnet PC address a five-second connection window while no client or pending
+recovery owns the service. The shared key is stored in the pairing directory
+(readable only by the current Windows user and SYSTEM). Requests carry a session id and a
+rising sequence number, and each is answered with an execution receipt that
+reports what the system backend actually did. The backend matches the exact
+firmware fingerprint of PICO 4 Pro / PICO OS 5.13.7 and refuses any other.
+
+The daemon reuses the system hand-tracking control and recovery backend. It saves
+the original configuration to a recovery journal before changing it and restores
+it on an explicit restore, a lost connection, or expiry of the 3000ms mode lease.
+The driver keeps a roughly 500ms heartbeat while it holds a mode. A restore
+failure keeps the saved baseline and stops control instead of retrying blindly.
+
+**Discovery and address changes.** The PC sends a 102-byte `PKD1` UDP request to
+the saved address and to `239.255.255.250:29744` on active private Ethernet/Wi-Fi
+interfaces. It includes the existing plaintext pairing key and a fresh random
+nonce. A matching `PKA1` reply echoes both; the PC selects the reply's source
+address and then uses the unchanged TCP control protocol. This is for a trusted
+LAN, not an encrypted or authenticated replacement for TCP. Face-tracking Bridge
+port 9030 is not used, and Bridge need not be installed or running.
+
+The daemon receives unicast on the explicit wlan0 address and multicast on the
+group address, with membership on wlan0; neither listener binds `0.0.0.0`. It
+checks wlan0 once per second. A new address closes the old client and restores
+the original hand-tracking state before serving control on the new address.
+Failed binds are retried without deleting the supervisor's ready marker. Runtime
+address changes do not rewrite pairing files.
+
+While the saved choice is auto, the provider retries transient network failures
+with fresh discovery/session state after a two-second pause. It also resumes
+after SteamVR standby. Stop/restore cancels an outstanding search; helper errors,
+protocol errors and unfinished HAND recovery do not auto-rearm. A valid discovery
+reply is required for a changed address; if discovery gets no reply, the provider
+tries the saved address for compatibility with older daemons.
+All discovery polling runs on the existing worker, not SteamVR's frame callback.
+
+**Boot and legacy migration.** The standalone boot script waits for
+`sys.boot_completed=1` and checks the saved enable choice. If the legacy state
+directory and its management script are present, it synchronously calls the old
+`disable` operation before enabling and starting the new service. The base module
+may call that same operation earlier at late_start. Legacy `stop`, `disable` and
+`restore` operations hold a separate management file lock for the whole recovery
+transaction, distinct from the native worker and supervisor locks; recovery
+children do not inherit it. After recovery succeeds, the standalone script checks
+the saved choice and module disable/removal markers again. The native migration
+guard is unchanged, and a fresh standalone installation needs no base module.
+
+**Installation.** The unified installer treats it as a separate item, selected
+with `-WithKnuckles`. Fresh installs add only the base unless `-WithKnuckles` is
+selected; upgrades keep an installed optional module. The base never touches the
+system hand-tracking setting. The flag needs a full installation and is rejected
+together with `-HeadsetOnly` or `-Mode 1`. When selected, the installer registers
+the driver, installs the daemon module and pairs the two once over a private LAN
+address pair, detected or given with `-HeadsetAddress` and `-PcAddress`; the
+pairing is stored for the calling Windows user and SYSTEM only. An installation
+receipt in that directory records that the module is installed, and the saved
+enabled or disabled choice is kept across upgrades. During installation, existing
+legacy state is retired through the newly staged base manager when available,
+or the active manager for an optional-only installation. A failed recovery stops
+installation before the new owner is installed. `-Action Disable` and
+`-Action Enable` act on this module alone,
+`-Action Configure` refreshes pairing when discovery is unavailable, and `-Action Status` reads
+the saved configuration without contacting the headset. `-Action UninstallKnuckles`
+restores hand tracking, unregisters the driver and marks the headset module for
+removal while the base module and battery display stay; `-Action Uninstall` does
+that first and then removes the rest. The headset module's boot script starts the
+daemon according to the saved choice. Instructions:
+[Installation and use](PC-SETUP.md).
+
+## 5. Managed mod
 
 `VdHsMod.dll` supplies managed extension-list changes, the in-app gesture switch
 and localization. The native layer handles PICO hand/controller pose selection.
 The managed backend is chosen through `payload/backend.txt` / `VDHS_BACKEND`:
 
-### 4.1 Backends
+### 5.1 Backends
 
 | Backend | What it does | State |
 |---|---|---|
@@ -200,7 +353,7 @@ None of these backends modify the installed APK; `redirect` only loads an
 assembly you already produced for your own device. Use mode `1`, not backend
 `none`, for an injection-only control run. Restart VD after changing the backend.
 
-### 4.2 UI switch and localization
+### 5.2 UI switch and localization
 
 `GestureToggle` creates the Input-tab checkbox at runtime and saves its value in
 the app-private `system_gestures.txt`. `service.sh` mirrors this value to the Shell;
@@ -220,7 +373,7 @@ Mixed fields restore their original font when returning to numbers or preserved
 names. Page recreation releases the old listeners and initializes the replacement;
 the initialization worker exits rather than scanning labels continuously.
 
-## 5. Configuration and rollback
+## 6. Configuration and rollback
 
 - `payload/mode.txt`: `1` = injection-only control,
   `2` = full layer (default). Mode `1` checks that Mono is reachable without
@@ -239,7 +392,7 @@ configuration values take precedence; the module never rewrites that file.
 Gesture suppression defaults off, localization follows the system language, and
 the startup helper defaults on only for its verified firmware fingerprint.
 
-## 6. Initialization and hook failure handling
+## 7. Initialization and hook failure handling
 
 `VdHsMod.Loader.Start()` catches and logs managed exceptions. The native payload
 uses a detached worker to wait for Mono and load the managed mod, rather than
@@ -253,7 +406,7 @@ partial installation cannot enable alpha-hole drawing or its layer flags.
 Once native-layer initialization starts, the managed payload and input probe
 leave runtime negotiation to VD-thread hooks, including after installation fails.
 
-## 7. Scope and limitations
+## 8. Scope and limitations
 
 - Targets: PICO 4 and PICO 4 Pro, arm64, Virtual Desktop Android 1.34.22.0. Internal
   layout/names are version-specific; a Virtual Desktop update can break the

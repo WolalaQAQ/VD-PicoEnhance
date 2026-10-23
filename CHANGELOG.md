@@ -2,6 +2,53 @@
 
 English | [简体中文](CHANGELOG_zh.md)
 
+## 1.0.9 — 2026-10-24
+
+This version shows PICO controller battery in SteamVR and adds **PicoHand<->Knuckles**, an optional module that switches between Valve Index controllers (Knuckles) and PICO optical hand tracking as you pick the controllers up and put them down. One installer sets up both.
+
+### Features
+
+- **Controller battery in SteamVR.** PICO controller battery levels travel in VD's existing controller data and reach SteamVR through a patch applied to your own copy of VD's PC driver. The patch carries battery only. When a controller temporarily loses its reading, the battery is marked unavailable instead of being reported as 0%; a real 0% still shows.
+- **PicoHand<->Knuckles (optional).** Pick up an Index controller and the system's hand tracking turns off, including its hand gestures; put it down and your hands come back. A pickup is a trackpad touch plus motion on the same controller. A putdown is every present controller released, with one second of stillness. The PC decides when that happens, and an independent root daemon on the headset applies it over your local network. Switching does not rely on Virtual Desktop's video stream, on hooks inside VD, on the face-tracking Bridge or on ADB, and the PC side is a small SteamVR driver that starts and stops with SteamVR.
+- **Automatic discovery and reconnection.** After a one-time pairing, the PC driver finds the headset on the local network, keeps finding it when either address changes within the same LAN, and reconnects after a short network drop or SteamVR standby. A saved Stop or Disable stays stopped.
+- **Newer SteamVR.** Trackpad input is also read through SteamVR's DriverInput 005 interface; 003 and 004 support is kept for older versions.
+- **One installer.** `install-vd-picoenhance.ps1` installs VD-PicoEnhance and battery display by default, and on a first installation adds PicoHand<->Knuckles with its pairing only when you pass `-WithKnuckles`. The same script offers `-Action Disable`, `Enable`, `Status`, `Configure` (refresh the pairing), `UninstallKnuckles` and `Uninstall`. An already installed module is kept and upgraded, with its enabled or disabled choice, whether or not the flag is repeated.
+- **Steadier boot and upgrades.** The headset module now does its own startup work only after Android reports that boot is complete. Upgrades from 1.0.8 are covered, and any earlier test build of the Knuckles switcher is retired in order before the new service starts.
+- **Hand-priority restore.** The PC driver sets the optical hands' priority only after a real switching decision, and puts the original priority back on Stop. If that restore has not finished, the original value stays saved, and a last attempt runs before SteamVR unloads the driver.
+
+### Install and upgrade
+
+Download `VD-PicoEnhance-v1.0.9.zip`; it holds the installer, the module packages and the hand mesh, so nothing else is needed. Extract it, exit VD and SteamVR, connect the headset with debugging and root authorized, and run from the extracted folder:
+
+```powershell
+# VD-PicoEnhance and PICO controller battery
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
+
+# the same, plus PicoHand<->Knuckles
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1 -WithKnuckles
+```
+
+The headset reboots once at the end. After that, start VD and SteamVR as usual. To upgrade from 1.0.8, run the same command from this bundle; an installed PicoHand<->Knuckles is upgraded along with it. [Installation and use](https://github.com/WolalaQAQ/VD-PicoEnhance/blob/v1.0.9/docs/PC-SETUP.md) covers daily use, disabling and removal.
+
+### Design Rationale
+
+- PicoHand<->Knuckles is its own SteamVR driver and its own headset daemon, connected directly over the local network. Keeping it apart from Virtual Desktop leaves the PC patch with battery only.
+- It is opt-in. The base installation never changes the headset's hand-tracking setting; only people who choose the module get a root daemon that does.
+- The daemon reuses the headset's existing system hand-tracking backend. It saves the original setting before changing it, and restores it on Stop, a lost connection, a three-second control lease running out, or a crash.
+- Without Index controllers the module only asks the headset for its status. It writes no hand-tracking preference and no system setting. A missing reading is never treated as a release, and when every controller disappears the original state is restored.
+- Discovery is a small UDP exchange that stays separate from the existing TCP control protocol. It reuses the same pairing key, and the TCP protocol itself is unchanged. It adds no program on the PC and does not depend on the face-tracking Bridge.
+- The release contains no Virtual Desktop DLL, original or patched. The battery patch is generated on your PC from your own copy of the driver, and the installer keeps the exact original.
+- Early boot on PICO OS 5.13.7 has a platform stall, also seen with the modules disabled, that can delay audio and the desktop by a minute or more. Running the module's own work after boot completes keeps it out of that window. VD's OpenXR layer still loads when VD starts, because it must be in place before VD enumerates extensions.
+
+### Notes & Caveats
+
+- PicoHand<->Knuckles needs root on the headset, Index controllers in SteamVR, and the PC and headset on the same private local network, where UDP multicast and TCP/UDP port 29744 can pass; guest networks with client isolation can block it. Its headset backend currently accepts only PICO 4 Pro on PICO OS 5.13.7 and refuses other firmware. The base module also supports the ordinary PICO 4.
+- With automatic mode running and controller tracking steady, touch and fully release each powered-on controller's trackpad once, including one you are not using. A connected controller whose touch state is unknown does not count as released.
+- Discovery and control send the pairing key in plaintext, so use them on a trusted home network and do not forward port 29744 to the internet. Pairing is stored for the Windows user who ran the installer.
+- Exit VD and SteamVR before running the installer. ADB is used only for installation, pairing and persistent headset management.
+- The PC battery patch targets VD Streamer 1.34.22.0 for Windows x64; unknown versions and outside modifications are refused. If battery data is unavailable, controller input carries on as before.
+- Checked on PICO 4 Pro / PICO OS 5.13.7 with VD 1.34.22.0: upgrading an official 1.0.8 module with this bundle and booting afterwards, with the existing Knuckles module, battery patch and pairing kept; pickup and putdown with both controllers in both directions on a current SteamVR; automatic discovery, reconnection after SteamVR standby, and Stop. Earlier tests of the same switching logic showed no system menu or recentering in Index mode and hands returning after putdown. A real router DHCP address change was not tried; address following is covered by simulated network tests.
+
 ## 1.0.8 — 2026-10-19
 
 ### Features

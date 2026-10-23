@@ -2,7 +2,6 @@
 // Full mode stages the payload; only VD's saved Input-tab switch enables it.
 // It does not run in the OpenXR runtime service or change system properties.
 #define _GNU_SOURCE
-#include <pthread.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/system_properties.h>
@@ -74,11 +73,7 @@ __attribute__((visibility("default")))
 int vdhs_shell_main(void* java_vm, int mode) {
     (void)java_vm;
     if (mode != 2) return 0;
-    pthread_t thread;
-    pthread_attr_t attributes;
-    pthread_attr_init(&attributes);
-    pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
-    int rc = pthread_create(&thread, &attributes, shell_thread, NULL);
-    pthread_attr_destroy(&attributes);
-    return rc;
+    // The injector already calls us on its post-boot worker, never Shell's main.
+    shell_thread(NULL);
+    return 0;
 }

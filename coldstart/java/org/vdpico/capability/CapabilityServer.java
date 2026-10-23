@@ -31,7 +31,7 @@ public final class CapabilityServer {
 
     private CapabilityServer() { }
 
-    /** Called once by the Zygisk system-server callback; never waits for package service. */
+    /** Called by the attached native worker after boot completion, not SystemServer's main. */
     public static void start(boolean enabled) {
         try {
             if (Process.myUid() != 1000 || Build.VERSION.SDK_INT != 29

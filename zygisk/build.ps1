@@ -58,6 +58,8 @@ $ModSrc      = Join-Path $ModuleRoot 'jni'
 $ModBuild    = Join-Path $ModSrc 'build-arm64'
 $CapabilitySrc = Join-Path $RepoRoot 'coldstart'
 $OutCapability = Join-Path $ModuleRoot 'capability'
+$MixedVRSource = Join-Path $RepoRoot 'mixedvr/headset'
+$OutBin = Join-Path $ModuleRoot 'bin'
 $OutZygisk   = Join-Path $ModuleRoot 'zygisk'
 $OutPayload  = Join-Path $ModuleRoot 'payload'
 $HandMesh    = Join-Path $RepoRoot 'assets\mesh\hand_mesh_fb.bin'
@@ -67,6 +69,8 @@ function Build-CMake([string]$src, [string]$build) {
     if ($Clean -and (Test-Path $build)) { Remove-Item -Recurse -Force $build }
     & $Cmake -S $src -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$Ninja" `
         "-DCMAKE_TOOLCHAIN_FILE=$Toolchain" -DANDROID_ABI=arm64-v8a `
+        "-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG -g0" "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -g0" `
+        "-DCMAKE_SHARED_LINKER_FLAGS_RELEASE=-Wl,--strip-all" `
         -DANDROID_PLATFORM=android-29 -DCMAKE_BUILD_TYPE=Release | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "cmake configure failed for $src" }
     & $Cmake --build $build
@@ -85,9 +89,11 @@ Build-CMake $NativeSrc $NativeBuild
 Write-Host '== 3/4 arm64-v8a.so (Zygisk module) =='
 Build-CMake $ModSrc $ModBuild
 & (Join-Path $CapabilitySrc 'build.ps1') -SdkRoot $SdkRoot
+Build-CMake $MixedVRSource (Join-Path $MixedVRSource 'build-arm64')
+& (Join-Path $MixedVRSource 'build-java.ps1') -SdkRoot $SdkRoot
 
 Write-Host '== 4/4 stage module tree =='
-New-Item -ItemType Directory -Force -Path $OutZygisk, $OutPayload, $OutCapability | Out-Null
+New-Item -ItemType Directory -Force -Path $OutZygisk, $OutPayload, $OutCapability, $OutBin | Out-Null
 
 Copy-Item (Join-Path $ModBuild 'arm64-v8a.so')    (Join-Path $OutZygisk 'arm64-v8a.so') -Force
 Copy-Item (Join-Path $CapabilitySrc 'build-arm64/dex/classes.dex') (Join-Path $OutCapability 'classes.dex') -Force
@@ -96,6 +102,8 @@ Copy-Item (Join-Path $NativeBuild 'libvdhs.so')   (Join-Path $OutPayload 'libvdh
 Copy-Item (Join-Path $NativeBuild 'libvdhs_shell.so') (Join-Path $OutPayload 'libvdhs_shell.so') -Force
 Copy-Item (Join-Path $ReleaseDir 'VdHsMod.dll')   (Join-Path $OutPayload 'VdHsMod.dll') -Force
 Copy-Item -LiteralPath $HandMesh -Destination (Join-Path $OutPayload 'hand_mesh_fb.bin') -Force
+Copy-Item -LiteralPath (Join-Path $MixedVRSource 'build-arm64/vdhs-mixedvrd') -Destination $OutBin -Force
+Copy-Item -LiteralPath (Join-Path $MixedVRSource 'build-arm64/tracking-control.jar') -Destination $OutBin -Force
 
 if ($Harmony) {
     $net35 = Join-Path $env:USERPROFILE '.nuget\packages\lib.harmony\2.3.5\lib\net35\0Harmony.dll'
@@ -128,12 +136,13 @@ if ($Pack) {
     $stage = Join-Path $dist 'stage'
     if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
-    foreach ($f in 'module.prop', 'customize.sh', 'post-fs-data.sh', 'service.sh', 'coldstart.sh', 'uninstall.sh') {
+    foreach ($f in 'module.prop', 'customize.sh', 'post-fs-data.sh', 'service.sh', 'coldstart.sh', 'mixedvr.sh', 'uninstall.sh') {
         Copy-Item (Join-Path $ModuleRoot $f) $stage -Force
     }
     Copy-Item $OutZygisk (Join-Path $stage 'zygisk') -Recurse -Force
     Copy-Item $OutPayload (Join-Path $stage 'payload') -Recurse -Force
     Copy-Item $OutCapability (Join-Path $stage 'capability') -Recurse -Force
+    Copy-Item $OutBin (Join-Path $stage 'bin') -Recurse -Force
     & (Join-Path $RepoRoot 'tools/pack-module.ps1') -StagePath $stage -ZipPath $zip
     Remove-Item -Recurse -Force $stage
     Write-Host "packed: $zip"

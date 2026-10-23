@@ -2,6 +2,53 @@
 
 [English](CHANGELOG.md) | 简体中文
 
+## 1.0.9 — 2026-10-24
+
+这个版本让 SteamVR 显示 PICO 手柄电量，并新增可选模块 **PicoHand<->Knuckles**：拿起或放下 Valve Index 指虎（Knuckles）时，自动在指虎与 PICO 光学手追之间切换。同一个安装器即可装好两者。
+
+### 功能
+
+- **SteamVR 显示手柄电量。** PICO 手柄电量通过 VD 原有的手柄数据传输，再由补在你本机 VD PC 驱动上的补丁发布到 SteamVR。补丁只承载电量。手柄暂时失去读数时，电量会标为不可用而不是报告 0%；真实的 0% 仍会显示。
+- **PicoHand<->Knuckles（可选）。** 拿起 Index 指虎时，系统手追（包括系统手势输入）关闭；放下后，光学手回来。拿起是同一只指虎的触摸板被触摸且在移动；放下是所有在线指虎都明确松开触摸板并静止 1 秒。由 PC 判断何时拿起或放下，头显上独立的 root daemon 通过局域网执行切换。切换不依赖 Virtual Desktop 的视频画面、VD 内的 hook、面捕 Bridge 或 ADB；PC 端是一个随 SteamVR 启停的小型 SteamVR driver。
+- **自动发现与重连。** 一次配对后，PC driver 会在局域网中自行找到头显；同一局域网内任一端换地址后仍能找到，网络短暂中断或 SteamVR 待机返回后会自动重连。已保存的 Stop 或停用选择保持停止。
+- **支持新版 SteamVR。** 触摸板输入同时支持 SteamVR 的 DriverInput 005，并保留 003、004，旧版 SteamVR 继续可用。
+- **一个安装器。** `install-vd-picoenhance.ps1` 默认安装 VD-PicoEnhance 和电量显示，首次安装时只有加 `-WithKnuckles` 才安装 PicoHand<->Knuckles 并完成配对。同一脚本还提供 `-Action Disable`、`Enable`、`Status`、`Configure`（刷新配对）、`UninstallKnuckles` 和 `Uninstall`。已安装的模块会被保留并升级，其启用或停用选择也不变，不必再次传入该参数。
+- **开机与升级更稳。** 头显模块自己的启动工作改为等 Android 报告开机完成后再执行。从 1.0.8 升级已覆盖；若头显上残留指虎切换的早期测试版本，会先按顺序将其退役，再启动新服务。
+- **手部优先级恢复。** PC driver 只在真正做出切换决策后才设置光学手的优先级，Stop 时把原优先级放回。恢复尚未完成时，原值会继续保存，SteamVR 卸载 driver 前还会做最后一次恢复。
+
+### 安装与升级
+
+只需下载 `VD-PicoEnhance-v1.0.9.zip`，安装脚本、模块包和手部网格都在里面。解压后退出 VD 和 SteamVR，连接已授权调试与 root 的头显，在解压目录运行：
+
+```powershell
+# VD-PicoEnhance 与 PICO 手柄电量
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
+
+# 同上，并加装 PicoHand<->Knuckles
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1 -WithKnuckles
+```
+
+头显会在最后重启一次，之后正常启动 VD 和 SteamVR 即可。从 1.0.8 升级时运行同一条命令；已安装的 PicoHand<->Knuckles 会一起升级。日常使用、停用和卸载见[安装与使用](https://github.com/WolalaQAQ/VD-PicoEnhance/blob/v1.0.9/docs/PC-SETUP_zh.md)。
+
+### 设计理由
+
+- PicoHand<->Knuckles 是独立的 SteamVR driver 加独立的头显 daemon，通过局域网直接连接。与 Virtual Desktop 分开，PC 补丁就只需承载电量。
+- 做成选装。基础安装不会改动头显的手追设置，只有选择了该模块的用户才会获得改动它的 root daemon。
+- daemon 复用头显现有的系统手追控制后端：改动前先保存原设置，在 Stop、断连、3 秒控制租约到期或崩溃时恢复原值。
+- 没有指虎时，模块只向头显查询状态，不写手追偏好，也不改系统设置。缺少读数不算松开，所有指虎都消失时恢复原状态。
+- 发现使用单独的小型 UDP 交互，与原有的 TCP 控制协议分开。它复用同一个配对密钥，TCP 协议本身不变。它不增加 PC 常驻程序，也不依赖面捕 Bridge。
+- 发行包不含任何 Virtual Desktop DLL（无论原件还是修补后的）。电量补丁在你本机用自己那份驱动生成，安装器保存精确原件。
+- PICO OS 5.13.7 开机早期存在平台层停顿，停用模块时同样出现，可能让音频和桌面延迟一分钟以上。模块自己的工作放到开机完成之后，就不会落在这段窗口里。VD 的 OpenXR 兼容层仍在 VD 启动时加载，因为它必须在 VD 枚举扩展之前就位。
+
+### 注意事项
+
+- PicoHand<->Knuckles 需要头显 root、SteamVR 中的 Index 指虎，以及处于同一私有局域网的 PC 与头显，网络需放行 UDP 组播和 TCP／UDP 29744 端口，开启客户端隔离的访客网络可能阻断。它的头显后端目前只接受 PICO 4 Pro／PICO OS 5.13.7 固件，其他固件会被拒绝。基础模块还支持普通 PICO 4。
+- 自动模式运行且指虎稳定定位后，每只已开启的指虎都需触摸并完全松开触摸板一次，包括暂时不用的另一只。仍在线但触摸状态未知的指虎不算松开。
+- 发现和控制都以明文发送配对密钥，请在可信的家庭网络中使用，不要将 29744 端口映射到公网。配对保存在运行安装器的 Windows 用户下。
+- 运行安装器前退出 VD 和 SteamVR。ADB 只用于安装、配对和持久启停管理。
+- PC 电量补丁针对受支持的 Windows x64 VD Streamer 1.34.22.0，未知版本和外部修改会被拒绝。电量数据不可用时，手柄输入照常工作。
+- 已在 PICO 4 Pro／PICO OS 5.13.7、VD 1.34.22.0 上核对：用本整合包升级官方 1.0.8 模块并开机，已有的指虎模块、电量补丁和配对均保留；在较新的 SteamVR 上，左右指虎双向拿放通过；自动发现、SteamVR 待机后重连和 Stop 通过。此前对同一套切换逻辑的测试显示，指虎模式下不弹系统菜单、不重定位，放下后手追恢复。没有实际改动过路由器的 DHCP 地址，地址跟随由模拟网络测试覆盖。
+
 ## 1.0.8 — 2026-10-19
 
 ### 功能
