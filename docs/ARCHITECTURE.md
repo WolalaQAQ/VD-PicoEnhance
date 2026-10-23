@@ -269,8 +269,10 @@ same-subnet PC address a five-second connection window while no client or pendin
 recovery owns the service. The shared key is stored in the pairing directory
 (readable only by the current Windows user and SYSTEM). Requests carry a session id and a
 rising sequence number, and each is answered with an execution receipt that
-reports what the system backend actually did. The backend matches the exact
-firmware fingerprint of PICO 4 Pro / PICO OS 5.13.7 and refuses any other.
+reports what the system backend actually did. On both PICO 4 and PICO 4 Pro,
+the backend requires the exact fingerprint of the verified PICO OS 5.13.7 build.
+It uses system hand-tracking control and does not require eye- or face-tracking
+hardware.
 
 The daemon reuses the system hand-tracking control and recovery backend. It saves
 the original configuration to a recovery journal before changing it and restores

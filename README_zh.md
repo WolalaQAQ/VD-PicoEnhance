@@ -50,7 +50,7 @@ SteamVR 里开孔的条件与 Virtual Desktop 自身的 `PassthroughPortals` 逻
 | Virtual Desktop | Android 版 `VirtualDesktop.Android` **1.34.22.0**，未修改 |
 | PC（安装与使用） | Windows x64，已装 Virtual Desktop Streamer **1.34.22.0** 和 SteamVR；安装时需要 Android platform-tools（`adb`） |
 | PC（仅构建用） | Windows + PowerShell、Android **NDK 26.1.10909125**、**CMake 3.22.1**、**platform 35**、**build-tools 35.0.0**、**JDK 17**、.NET SDK |
-| PicoHand<->Knuckles（可选） | SteamVR中的Valve Index指虎；运行PICO OS 5.13.7的PICO 4 Pro（其头显后端目前支持的固件）；PC与头显在同一私有局域网。root已是基础模块的要求 |
+| PicoHand<->Knuckles（可选） | SteamVR中的Valve Index指虎；PICO 4或PICO 4 Pro，固件须满足[头显后端的匹配要求](docs/PC-SETUP_zh.md#安装前的准备)；PC与头显在同一私有局域网。root已是基础模块的要求 |
 
 其他 Virtual Desktop 版本尚未验证。兼容层通过应用内存中的符号与 PICO runtime 的解析接口工作，但内部方法名与版本相关。
 

@@ -12,7 +12,9 @@ The base needs:
 - a Windows PC with the supported VD Streamer 1.34.22.0 and SteamVR;
 - Android platform-tools (`adb`) on the PC, with debugging and the shell's root request authorized on the headset.
 
-PicoHand<->Knuckles also needs Valve Index controllers in SteamVR, a PICO 4 Pro on PICO OS 5.13.7 (the firmware its headset backend currently supports; other firmware is refused), and the PC and headset on the same private local network (10.x, 172.16–31.x or 192.168.x addresses) with a path between them.
+PicoHand<->Knuckles is for both PICO 4 and PICO 4 Pro and does not require eye- or face-tracking hardware. It also needs Valve Index controllers in SteamVR and a PC and headset that can reach each other on the same private local network (10.x, 172.16–31.x or 192.168.x addresses).
+
+For both models, the headset backend currently requires an exact firmware fingerprint match to the verified PICO OS 5.13.7 build. The accepted value is `Pico/Phoenix/PICOA8110:10/5.13.7/smartcm.1761755159:user/dev-keys`; check yours with `adb shell getprop ro.build.fingerprint`. A different fingerprint is refused even if the version number is the same.
 
 ## Install once
 

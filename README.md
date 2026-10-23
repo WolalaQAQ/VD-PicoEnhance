@@ -50,7 +50,7 @@ The unified installer below sets up everything else by default. On a first insta
 | Virtual Desktop | Android `VirtualDesktop.Android` **1.34.22.0**, unmodified |
 | PC (install and use) | Windows x64 with Virtual Desktop Streamer **1.34.22.0** and SteamVR; Android platform-tools (`adb`) for installation |
 | PC (build only) | Windows + PowerShell, Android **NDK 26.1.10909125**, **CMake 3.22.1**, **platform 35**, **build-tools 35.0.0**, **JDK 17**, .NET SDK |
-| PicoHand<->Knuckles (optional) | Valve Index controllers in SteamVR; a PICO 4 Pro on PICO OS 5.13.7, the firmware its headset backend currently supports; the PC and headset on the same private local network. Root is already required by the base module |
+| PicoHand<->Knuckles (optional) | Valve Index controllers in SteamVR; PICO 4 or PICO 4 Pro with firmware that meets the [headset backend's matching requirements](docs/PC-SETUP.md#before-you-install); the PC and headset on the same private local network. Root is already required by the base module |
 
 Other Virtual Desktop versions are untested. The compatibility layer works through symbols in the app's memory and the PICO runtime's resolution interface, but internal method names are version-specific.
 

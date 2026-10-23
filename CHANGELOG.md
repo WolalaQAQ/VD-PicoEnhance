@@ -42,7 +42,7 @@ The headset reboots once at the end. After that, start VD and SteamVR as usual. 
 
 ### Notes & Caveats
 
-- PicoHand<->Knuckles needs root on the headset, Index controllers in SteamVR, and the PC and headset on the same private local network, where UDP multicast and TCP/UDP port 29744 can pass; guest networks with client isolation can block it. Its headset backend currently accepts only PICO 4 Pro on PICO OS 5.13.7 and refuses other firmware. The base module also supports the ordinary PICO 4.
+- PicoHand<->Knuckles is for both PICO 4 and PICO 4 Pro and does not require eye- or face-tracking hardware. For both models, its headset backend currently requires an exact firmware fingerprint match to the verified PICO OS 5.13.7 build. It needs root on the headset, Index controllers in SteamVR, and the PC and headset on the same private local network, where UDP multicast and TCP/UDP port 29744 can pass; guest networks with client isolation can block it.
 - With automatic mode running and controller tracking steady, touch and fully release each powered-on controller's trackpad once, including one you are not using. A connected controller whose touch state is unknown does not count as released.
 - Discovery and control send the pairing key in plaintext, so use them on a trusted home network and do not forward port 29744 to the internet. Pairing is stored for the Windows user who ran the installer.
 - Exit VD and SteamVR before running the installer. ADB is used only for installation, pairing and persistent headset management.

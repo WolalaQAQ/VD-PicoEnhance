@@ -12,7 +12,9 @@
 - 装有受支持的 VD Streamer 1.34.22.0 和 SteamVR 的 Windows PC；
 - PC 上的 Android platform-tools（`adb`），并在头显上授权调试和 shell 的 root 请求。
 
-使用 PicoHand<->Knuckles 还需要：SteamVR 中的 Valve Index 指虎；运行 PICO OS 5.13.7 的 PICO 4 Pro（其头显后端目前支持的固件，其他固件会被拒绝）；PC 与头显处于同一个私有局域网（10.x、172.16–31.x 或 192.168.x 地址）并能互相访问。
+PicoHand<->Knuckles 适用于 PICO 4 和 PICO 4 Pro，不依赖眼追或面捕硬件。使用时还需要 SteamVR 中的 Valve Index 指虎，以及处于同一个私有局域网（10.x、172.16–31.x 或 192.168.x 地址）且能互相访问的 PC 与头显。
+
+两种机型的头显后端目前均要求完整固件指纹匹配已验证的 PICO OS 5.13.7 构建。匹配值为 `Pico/Phoenix/PICOA8110:10/5.13.7/smartcm.1761755159:user/dev-keys`，可用 `adb shell getprop ro.build.fingerprint` 查看；版本号相同但指纹不同的固件也会被拒绝。
 
 ## 一次安装
 

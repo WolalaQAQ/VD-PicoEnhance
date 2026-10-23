@@ -42,7 +42,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
 
 ### 注意事项
 
-- PicoHand<->Knuckles 需要头显 root、SteamVR 中的 Index 指虎，以及处于同一私有局域网的 PC 与头显，网络需放行 UDP 组播和 TCP／UDP 29744 端口，开启客户端隔离的访客网络可能阻断。它的头显后端目前只接受 PICO 4 Pro／PICO OS 5.13.7 固件，其他固件会被拒绝。基础模块还支持普通 PICO 4。
+- PicoHand<->Knuckles 适用于 PICO 4 和 PICO 4 Pro，不依赖眼追或面捕硬件；两种机型的头显后端目前均要求完整固件指纹匹配已验证的 PICO OS 5.13.7 构建。使用时需要头显 root、SteamVR 中的 Index 指虎，以及处于同一私有局域网的 PC 与头显；网络需放行 UDP 组播和 TCP／UDP 29744 端口，开启客户端隔离的访客网络可能阻断。
 - 自动模式运行且指虎稳定定位后，每只已开启的指虎都需触摸并完全松开触摸板一次，包括暂时不用的另一只。仍在线但触摸状态未知的指虎不算松开。
 - 发现和控制都以明文发送配对密钥，请在可信的家庭网络中使用，不要将 29744 端口映射到公网。配对保存在运行安装器的 Windows 用户下。
 - 运行安装器前退出 VD 和 SteamVR。ADB 只用于安装、配对和持久启停管理。
