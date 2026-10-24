@@ -58,8 +58,11 @@ The in-app gesture switch is independent of the startup capability helper.
 ### VD-only system launch capability
 
 `coldstart/java/org/vdpico/capability/` is the existing Android-10 metadata
-helper. Before specialization, Zygisk's server callback reads the saved choice
-and the separate DEX; the server's boot thread only starts a native worker and
+helper. Before specialization, Zygisk's server callback checks full mode and the
+payload, then asks the root Zygisk companion for the saved choice. The companion
+reads one fixed root-private setting and returns missing, off, on or error; only
+missing falls back to the module setting. The callback reads the separate DEX
+without traversing root-private parent directories. The server's boot thread only starts a native worker and
 returns. After `sys.boot_completed=1` that worker attaches to the VM, loads the
 DEX with `InMemoryDexClassLoader` and starts the helper threads. No VD, OpenXR or
 Mono payload is loaded into system_server. The post-fs-data script does nothing,

@@ -13,7 +13,7 @@ VD-PicoEnhance is a Magisk/Zygisk module that adds these features at runtime whi
 
 ## Updates
 
-Features and upgrade notes for each version are in the [changelog](CHANGELOG.md). This page describes version 1.0.9. For an older release, read the documentation under that version's tag.
+Features and upgrade notes for each version are in the [changelog](CHANGELOG.md). This page describes version 1.0.10. For an older release, read the documentation under that version's tag.
 
 ## Features
 

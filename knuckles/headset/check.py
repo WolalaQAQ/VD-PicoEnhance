@@ -37,11 +37,14 @@ class StandaloneTests(unittest.TestCase):
         (OUT / 'core_source.h').write_text(section(cls.source, 'static bool journal(void)', 'static void reply('), encoding='utf-8')
         (OUT / 'reply_source.h').write_text(section(cls.source, 'static void reply(', '#include "lan_config.h"'), encoding='utf-8')
         (OUT / 'serve_source.h').write_text(section(cls.source, 'static void startup_error(', 'static int supervise(void)'), encoding='utf-8')
+        controller = (HERE.parent / 'pc/src/controller.cpp').read_text(encoding='utf-8')
+        (OUT / 'pc_event_source.h').write_text(section(controller, 'void mv_standalone_event(', 'void mv_standalone_stop('), encoding='utf-8')
         obj, dll = OUT / 'host.obj', OUT / 'host.dll'
         commands = [
             [str(LLVM / 'clang.exe'), '--target=x86_64-pc-windows-msvc', '-std=c11',
              '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-O2', '-Wall', '-Wextra', '-Werror',
-             '-I', str(OUT), '-I', str(SOURCE), '-c', str(HERE / 'checks/host.c'), '-o', str(obj)],
+             '-I', str(OUT), '-I', str(SOURCE), '-I', str(HERE.parents[1] / 'pc/driver/src'),
+             '-c', str(HERE / 'checks/host.c'), '-o', str(obj)],
             [str(LLVM / 'ld.lld.exe'), '-flavor', 'link', '/dll', '/noentry', '/nodefaultlib',
              '/machine:x64', '/wx', '/out:' + str(dll), str(obj)],
         ]
@@ -63,6 +66,8 @@ class StandaloneTests(unittest.TestCase):
         cls.lib.value.argtypes = [C.c_int]
         cls.lib.value.restype = C.c_uint64
         cls.lib.answers.restype = C.c_char_p
+        cls.lib.pc_status_ready.argtypes = [C.c_char_p]
+        cls.lib.pc_status_ready.restype = C.c_int
         cls.lib.startup_log.restype = C.c_char_p
         cls.lib.discovery_answer.restype = C.c_char_p
         kernel = C.WinDLL('kernel32', use_last_error=True)
@@ -117,6 +122,33 @@ class StandaloneTests(unittest.TestCase):
         self.assertEqual(self.lib.value(16), 29744)
         self.assertIn(b'VDR1 1 0 1 unobserved ok\n', self.lib.answers())
         self.assertEqual(self.lib.value(6), 0)
+
+    def test_status_get_failure_returns_error_without_system_writes(self):
+        self.lib.option(18, 1)
+        self.connect(); self.request(1, 'status')
+        self.assertEqual(self.lib.run(), 0)
+        self.assertEqual(self.lib.answers(), b'VDR1 1 0 error unobserved error\n')
+        for counter in (3, 4, 6, 7, 8, 9, 10, 11):
+            self.assertEqual(self.lib.value(counter), 0)
+
+    def test_status_get_failure_does_not_make_pc_ready(self):
+        self.lib.option(18, 1)
+        self.connect(); self.request(1, 'status')
+        self.assertEqual(self.lib.run(), 0)
+        self.assertEqual(self.lib.pc_status_ready(self.lib.answers()), 0)
+
+    def test_status_zero_and_one_still_make_pc_ready_without_system_writes(self):
+        for initial in (0, 1):
+            with self.subTest(initial=initial):
+                self.lib.reset(initial)
+                self.connect(); self.request(1, 'status')
+                self.assertEqual(self.lib.run(), 0)
+                self.assertEqual(self.lib.answers(), f'VDR1 1 0 {initial} unobserved ok\n'.encode())
+                self.assertEqual(self.lib.pc_status_ready(self.lib.answers()), 1)
+                self.assertEqual(self.lib.value(1), initial)
+                self.assertEqual(self.lib.value(2), initial)
+                for counter in (3, 4, 6, 7, 8, 9, 10, 11):
+                    self.assertEqual(self.lib.value(counter), 0)
 
     def test_missing_network_config_does_not_open_listener(self):
         self.lib.option(4, 0)

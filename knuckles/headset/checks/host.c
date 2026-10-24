@@ -106,7 +106,7 @@ static bool write_pending, restoring_system, owned, restore_pending;
 static char baseline[8], expected[8], previous_value[8], token[65];
 static int db, consumer, snapshot_value, journal_present, enabled, network_valid;
 static int unsafe, snapshots, sets, renotifies, starts, stops, restores, accepts, reads;
-static int fail_mode, fail_restore, metadata_ok, inflight_ok;
+static int fail_mode, fail_restore, fail_get, metadata_ok, inflight_ok;
 static int legacy_exists, legacy_requested, legacy_pending, legacy_locked, lock_fd;
 static int address_assigned, freebind_set, fail_freebind, port_busy, fail_socket, fail_listen, fail_ready;
 static int ready_writes, bind_calls, freebind_calls, listen_calls, server_closes;
@@ -126,7 +126,7 @@ static bool atomic_file(const char *path, const char *text, uid_t uid, gid_t gid
     else if (strcmp(path, ROOT "/lease") && strcmp(path, ROOT "/ready")) ++unsafe;
     return true;
 }
-static bool setting_get(char out[8]) { snprintf(out, 8, "%d", db); return true; }
+static bool setting_get(char out[8]) { if (fail_get) return false; snprintf(out, 8, "%d", db); return true; }
 static bool configuration_value(const char *operation, char out[8]) {
     int value = db;
     if (!strcmp(operation, "snapshot")) { ++snapshots; snapshot_value = db; }
@@ -349,7 +349,7 @@ API void reset(int initial) {
     db = consumer = initial; snapshot_value = -1; journal_present = 0;
     enabled = network_valid = metadata_ok = inflight_ok = 1;
     unsafe = snapshots = sets = renotifies = starts = stops = restores = accepts = reads = 0;
-    fail_mode = fail_restore = 0;
+    fail_mode = fail_restore = fail_get = 0;
     legacy_exists = 1; legacy_requested = legacy_pending = legacy_locked = 0; lock_fd = 70;
     event_count = event_index = 0; replies[0] = 0; bound_address = 0; bound_port = 0;
     diagnostics[0] = 0; address_assigned = 1;
@@ -386,6 +386,7 @@ API void option(int which, int value) {
     case 13: port_busy = value; break; case 14: fail_socket = value; break;
     case 15: fail_listen = value; break; case 16: fail_ready = value; break;
     case 17: fail_discovery = value; break;
+    case 18: fail_get = value; break;
     }
 }
 API uint64_t value(int which) {
@@ -403,3 +404,28 @@ API uint64_t value(int which) {
     } return 0;
 }
 API int migration(void) { int held = -1; return migration_guard(&held) ? held + 2 : 0; }
+
+// Feed the real daemon reply through the production PC parser and readiness
+// callback. Only the callback's ready field is needed from the controller.
+#define reply pc_client_reply
+#include "headset_client.c"
+#undef reply
+typedef struct { bool ready; } MvStandalone;
+#include "pc_event_source.h"
+static void pc_event(void *user, const MvHeadsetEvent *event) {
+    mv_standalone_event(user, event);
+}
+API int pc_status_ready(const char *text) {
+    MvStandalone state = {0};
+    MvHeadsetClient client = {0};
+    size_t length = strlen(text);
+    if (!length || text[length - 1] != '\n' || length > sizeof client.incoming) { ++unsafe; return -1; }
+    memcpy(client.incoming, text, length - 1);
+    client.incoming_size = (uint32_t)length - 1;
+    client.pending_command = MV_HEADSET_STATUS;
+    client.pending_sequence = 1;
+    client.io.user = &state;
+    client.io.event = pc_event;
+    (void)pc_client_reply(&client);
+    return state.ready;
+}

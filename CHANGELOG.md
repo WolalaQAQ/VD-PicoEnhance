@@ -2,6 +2,23 @@
 
 English | [简体中文](CHANGELOG_zh.md)
 
+## 1.0.10 — 2026-10-25
+
+### Fixes
+
+- Restore hand-mode VD startup with SELinux Enforcing. The startup helper now reads its saved enable/disable choice through the root Zygisk companion, instead of trying to traverse root-private storage during system-server specialization.
+- Fix a false-success status in the optional PicoHand<->Knuckles headset daemon. If the system hand-tracking configuration cannot be read, STATUS now reports an error rather than allowing the PC to treat the backend as ready.
+
+### Design Rationale
+
+- The companion reads one fixed setting and returns only missing, off, on or error. A saved choice takes priority; only a genuinely missing setting uses the existing module default. Read or connection errors do not enable the helper.
+- No SELinux rules are added. Boot deferral, the VD-only metadata declaration, controller pickup/putdown rules, pairing and recovery behavior are unchanged.
+
+### Upgrade and verification
+
+- Download `VD-PicoEnhance-v1.0.10.zip`, exit VD and SteamVR, then run the included installer as before. Installed optional modules are upgraded, and settings, pairing and enabled/disabled choices are preserved. The headset reboots once.
+- Verified on PICO 4 Pro / PICO OS 5.13.7 with VD 1.34.22.0 and SELinux Enforcing: hand-mode launch, hand tracking, hand passthrough, both controllers' pickup/putdown switching, and menu recovery. The existing firmware-matching requirements still apply.
+
 ## 1.0.9 — 2026-10-24
 
 This version shows PICO controller battery in SteamVR and adds **PicoHand<->Knuckles**, an optional module that switches between Valve Index controllers (Knuckles) and PICO optical hand tracking as you pick the controllers up and put them down. One installer sets up both.

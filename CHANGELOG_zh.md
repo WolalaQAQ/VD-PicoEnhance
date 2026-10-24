@@ -2,6 +2,23 @@
 
 [English](CHANGELOG.md) | 简体中文
 
+## 1.0.10 — 2026-10-25
+
+### 修复
+
+- 修复 SELinux Enforcing 下无法用手势启动 VD 的问题。启动助手改为通过 root Zygisk companion 读取已保存的启用／停用选择，不再在 system_server 专门化阶段穿越 root 私有目录。
+- 修复选装 PicoHand<->Knuckles 头显 daemon 的状态误报。系统手追配置读取失败时，STATUS 现在报告错误，不再让 PC 将后端误判为就绪。
+
+### 设计理由
+
+- companion 只读一个固定设置，仅返回缺失、关、开或错误四种状态。保存的选择优先；只有文件确实不存在才沿用模块默认值，读取或连接失败不会启用助手。
+- 不增加 SELinux 规则。开机延后、VD 专属能力声明、指虎拿放判据、配对及恢复行为保持不变。
+
+### 升级与验证
+
+- 下载 `VD-PicoEnhance-v1.0.10.zip`，退出 VD 和 SteamVR 后，照常运行包内安装器。已安装的选装模块会一起升级，设置、配对与启用／停用选择保留；头显最后重启一次。
+- 已在 PICO 4 Pro／PICO OS 5.13.7、VD 1.34.22.0、SELinux Enforcing 下验证：手势启动、手追、手部透视、左右指虎拿起／放下切换及菜单恢复。现有固件匹配要求不变。
+
 ## 1.0.9 — 2026-10-24
 
 这个版本让 SteamVR 显示 PICO 手柄电量，并新增可选模块 **PicoHand<->Knuckles**：拿起或放下 Valve Index 指虎（Knuckles）时，自动在指虎与 PICO 光学手追之间切换。同一个安装器即可装好两者。

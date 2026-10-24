@@ -206,7 +206,10 @@ public:
 
     void preServerSpecialize(zygisk::ServerSpecializeArgs*) override {
         int directory = api_->getModuleDir();
-        vd_capability_prepare(directory);
+        if (vd_capability_prepare(directory)) {
+            errno = 0;
+            vd_capability_capture(directory, api_->connectCompanion());
+        }
         if (directory >= 0) close(directory);
     }
 
@@ -354,3 +357,4 @@ private:
 };
 
 REGISTER_ZYGISK_MODULE(VdHsModule)
+REGISTER_ZYGISK_COMPANION(vd_capability_companion)

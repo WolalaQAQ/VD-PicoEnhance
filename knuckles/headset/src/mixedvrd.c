@@ -421,7 +421,7 @@ static bool decimal_u64(const char *text, uint64_t *value) {
 
 static void reply(int fd, uint64_t seq, bool ok) {
     char setting[8] = "error";
-    setting_get(setting);
+    ok = setting_get(setting) && ok;
     char text[256];
     // settings readback is deliberately not called a verified algorithm stop.
     int n = snprintf(text, sizeof text, "VDR1 %" PRIu64 " %d %s %s %s\n",

@@ -5,7 +5,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/system_properties.h>
 #include <unistd.h>
@@ -42,6 +44,16 @@ bool small_file(int directory, const char* name, char* text, size_t capacity, bo
     }
     close(fd);
     return valid;
+}
+
+void saved_request(char* reply) {
+    *reply = 'E';
+    char setting[32]; bool missing;
+    bool saved = small_file(AT_FDCWD, "/data/adb/vdhs-vd-capability/requested", setting, sizeof setting, &missing);
+    if (!saved && !missing) return;
+    if (missing) *reply = 'M';
+    else if (!strcmp(setting, "VDC2 0\n")) *reply = '0';
+    else if (!strcmp(setting, "VDC2 1\n")) *reply = '1';
 }
 
 bool full_mode(int directory) {
@@ -81,23 +93,65 @@ bool checked(JNIEnv* env, const char* step) {
 }
 } // namespace
 
-void vd_capability_prepare(int directory) {
+void vd_capability_companion(int client) {
+    // The callback borrows Magisk's socket; no paths or commands arrive from the peer.
+    char reply;
+    errno = 0;
+    saved_request(&reply);
+    if (reply == 'E') {
+        __android_log_print(ANDROID_LOG_ERROR, kTag, "stage=saved-request errno=%d; helper skipped", errno);
+    }
+    if (send(client, &reply, 1, MSG_NOSIGNAL | MSG_DONTWAIT) != 1) {
+        __android_log_print(ANDROID_LOG_ERROR, kTag, "stage=companion-send errno=%d", errno);
+    }
+}
+
+bool vd_capability_prepare(int directory) {
     if (dex_bytes) { free(dex_bytes); dex_bytes = nullptr; dex_size = 0; }
     requested = true;
-    if (directory < 0 || !full_mode(directory) ||
-        !payload_ready(directory, "payload/libvdhs.so", true) || !payload_ready(directory, "payload/VdHsMod.dll", false)) return;
-    char setting[32]; bool missing;
-    bool saved = small_file(AT_FDCWD, "/data/adb/vdhs-vd-capability/requested", setting, sizeof setting, &missing);
-    if (!saved && !missing) return;
-    if (saved || small_file(directory, "vd-capability.txt", setting, sizeof setting, &missing)) {
-        if (!strcmp(setting, "VDC2 0\n")) requested = false;
-        else if (strcmp(setting, "VDC2 1\n")) {
-            __android_log_print(ANDROID_LOG_ERROR, kTag, "Invalid VD-only configuration; server helper skipped");
+    return directory >= 0 && full_mode(directory) &&
+           payload_ready(directory, "payload/libvdhs.so", true) && payload_ready(directory, "payload/VdHsMod.dll", false);
+}
+
+void vd_capability_capture(int directory, int companion) {
+    if (companion < 0) {
+        __android_log_print(ANDROID_LOG_ERROR, kTag, "stage=companion-connect errno=%d; helper skipped", errno);
+        return;
+    }
+    pollfd wait {companion, POLLIN, 0};
+    int ready = poll(&wait, 1, 1000);
+    char reply = 'E';
+    ssize_t count = -1;
+    int error = ready == 0 ? ETIMEDOUT : errno;
+    if (ready > 0) {
+        count = recv(companion, &reply, 1, MSG_DONTWAIT);
+        error = count < 0 ? errno : EIO;
+    }
+    close(companion);
+    if (count != 1 || (reply != 'M' && reply != '0' && reply != '1')) {
+        __android_log_print(ANDROID_LOG_ERROR, kTag, "stage=companion-reply errno=%d; helper skipped", error);
+        return;
+    }
+    if (reply == '0') requested = false;
+    if (reply == 'M') {
+        char setting[32]; bool missing;
+        errno = 0;
+        if (small_file(directory, "vd-capability.txt", setting, sizeof setting, &missing)) {
+            if (!strcmp(setting, "VDC2 0\n")) requested = false;
+            else if (strcmp(setting, "VDC2 1\n")) {
+                __android_log_print(ANDROID_LOG_ERROR, kTag, "stage=module-request errno=0; helper skipped");
+                return;
+            }
+        } else if (!missing) {
+            __android_log_print(ANDROID_LOG_ERROR, kTag, "stage=module-request errno=%d; helper skipped", errno);
             return;
         }
-    } else if (!missing) return;
+    }
     int fd = openat(directory, "capability/classes.dex", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-    if (fd < 0) return;
+    if (fd < 0) {
+        __android_log_print(ANDROID_LOG_ERROR, kTag, "stage=dex-open errno=%d; helper skipped", errno);
+        return;
+    }
     struct stat st {};
     if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_uid == 0 && (st.st_mode & 0022) == 0 &&
         st.st_size >= 112 && static_cast<size_t>(st.st_size) <= kMaxDex) {
