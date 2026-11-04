@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import zipfile
@@ -39,9 +40,10 @@ def main():
     for path in (HERE / 'module').iterdir():
         shutil.copyfile(path, output / path.name)
     shutil.copyfile(HERE / 'src/standalone.sh', output / 'standalone.sh')
-    version = next(line.split('=', 1)[1] for line in (ROOT / 'zygisk/module.prop').read_text().splitlines()
-                   if line.startswith('version='))
-    props = (output / 'module.prop').read_text().replace('version=prototype', 'version=' + version)
+    base_props = dict(line.split('=', 1) for line in (ROOT / 'zygisk/module.prop').read_text().splitlines())
+    props = (output / 'module.prop').read_text()
+    for key in ('version', 'versionCode'):
+        props = re.sub(r'(?m)^' + key + r'=.*$', key + '=' + base_props[key], props)
     (output / 'module.prop').write_text(props, encoding='utf-8', newline='\n')
     package = HERE.parent / 'dist/PicoHand-Knuckles.zip'
     package.parent.mkdir(exist_ok=True)

@@ -1,6 +1,6 @@
 # Source/capsule checks run without VD. Optional exact-original fixtures execute
 # installer transactions only inside this script's newly created temp directory.
-param([Parameter(Mandatory=$true)][string]$PackagePath, [string]$OriginalDriver, [string]$PreviousCapsule)
+param([Parameter(Mandatory=$true)][string]$PackagePath, [string]$OriginalDriver, [string]$PreviousCapsule, [string]$UpgradeFromDriver)
 $ErrorActionPreference = 'Stop'
 $PackagePath = [IO.Path]::GetFullPath($PackagePath)
 if (-not ('VdPicoEnhance.NativePatch' -as [type])) { Add-Type -Path (Join-Path $PackagePath 'NativePatch.cs') }
@@ -15,7 +15,7 @@ $capsule = [IO.File]::ReadAllBytes((Join-Path $PackagePath 'vd-picoenhance.pe'))
 Assert ([VdPicoEnhance.NativePatch]::Hash($capsule) -eq $metadata.capsule_sha256) 'Capsule hash mismatch.'
 $pe = New-Object VdPicoEnhance.NativePatch+Pe -ArgumentList (,$capsule)
 $exports = $pe.Exports()
-foreach ($name in @('vd_native_run_frame','vd_native_runtime_table')) { Assert ($exports.ContainsKey($name)) "Missing capsule export: $name" }
+foreach ($name in @('vd_native_run_frame','vd_native_runtime_table','vd_native_image_layout')) { Assert ($exports.ContainsKey($name)) "Missing capsule export: $name" }
 foreach ($name in @('mv_trial_init','mv_trial_cleanup','mv_trial_create','mv_trial_update')) { Assert (-not $exports.ContainsKey($name)) "Base battery package contains switching hook: $name" }
 Assert ($metadata.kind -eq 'battery-only-v1') 'Expected the battery-only capsule.'
 foreach ($encoding in @([Text.Encoding]::ASCII, [Text.Encoding]::Unicode)) {
@@ -31,12 +31,15 @@ Rejects { [VdPicoEnhance.NativePatch]::Apply([byte[]]@(1,2,3),$capsule) }
 Write-Host 'PASS: own-code capsule metadata/exports, portable paths, script syntax, unsupported original refusal.'
 if (-not $OriginalDriver) { Write-Host 'Vendor original not supplied: installer transaction fixtures were not run.'; return }
 $original = [IO.File]::ReadAllBytes([IO.Path]::GetFullPath($OriginalDriver))
-Assert ([VdPicoEnhance.NativePatch]::Hash($original) -eq [VdPicoEnhance.NativePatch]::OriginalSha256) 'Fixture is not the supported original.'
+$originalHash = [VdPicoEnhance.NativePatch]::Hash($original)
+Assert ([VdPicoEnhance.NativePatch]::IsSupportedOriginal($originalHash)) 'Fixture is not a supported original.'
 $parent = Join-Path ([IO.Path]::GetTempPath()) 'opencode'
 New-Item -ItemType Directory -Force -Path $parent | Out-Null
 $work = Join-Path $parent ('vd-pc-install-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $work | Out-Null
 $target = Join-Path $work 'driver_VirtualDesktop.dll'
+$backupPath = $target + '.vd-picoenhance-original'
+if ($originalHash -eq [VdPicoEnhance.NativePatch]::CurrentOriginalSha256) { $backupPath += '-' + $originalHash }
 $installer = Join-Path $PackagePath 'install.ps1'
 $savedLocal = $env:LOCALAPPDATA
 $env:LOCALAPPDATA = Join-Path $work 'profile'
@@ -47,12 +50,16 @@ try {
     [IO.File]::WriteAllBytes($target,$original)
     $fakeRuntime.Running=$true
     Rejects { & $installer -Action Install -DriverPath $target -PackagePath $PackagePath } 'Exit SteamVR'
-    Assert ([VdPicoEnhance.NativePatch]::Hash([IO.File]::ReadAllBytes($target)) -eq [VdPicoEnhance.NativePatch]::OriginalSha256) 'Running-process guard changed original.'
-    Assert (-not (Test-Path -LiteralPath ($target+'.vd-picoenhance-original'))) 'Guard created a backup before refusing.'
+    Assert ([VdPicoEnhance.NativePatch]::Hash([IO.File]::ReadAllBytes($target)) -eq $originalHash) 'Running-process guard changed original.'
+    Assert (-not (Test-Path -LiteralPath $backupPath)) 'Guard created a backup before refusing.'
     $fakeRuntime.Running=$false
     & $installer -Action Install -DriverPath $target -PackagePath $PackagePath
     $expected = [VdPicoEnhance.NativePatch]::Hash([VdPicoEnhance.NativePatch]::Apply($original,$capsule))
     $patched = [VdPicoEnhance.NativePatch]::Apply($original,$capsule)
+    $patchedPe = New-Object VdPicoEnhance.NativePatch+Pe -ArgumentList (,$patched)
+    $layout = $patchedPe.Offset($exports['vd_native_image_layout'] + [VdPicoEnhance.NativePatch]::Delta)
+    $expectedLayout = if ($originalHash -eq [VdPicoEnhance.NativePatch]::CurrentOriginalSha256) { @(0x121f0,0x19cf0,0x19d38) } else { @(0x12200,0x19d00,0x19d48) }
+    for ($i=0; $i -lt 3; ++$i) { Assert ([BitConverter]::ToUInt32($patched,$layout+4*$i) -eq $expectedLayout[$i]) 'Wrong version-specific native call target.' }
     $oldPe = New-Object VdPicoEnhance.NativePatch+Pe -ArgumentList (,$original)
     foreach ($site in @(0x7fd58,0x7fd60,0xd215,0xd25f)) {
         $offset=$oldPe.Offset([uint32]$site)
@@ -77,14 +84,17 @@ try {
     [IO.File]::WriteAllText((Join-Path $profile 'phase.txt'),"7 auto`n")
     & $installer -Action Uninstall -DriverPath $target -PackagePath $PackagePath
     Assert ((Get-Content -LiteralPath (Join-Path $profile 'phase.txt') -Raw).Trim() -eq '7 auto') 'Battery-only uninstall changed unrelated saved input control.'
-    Assert ([VdPicoEnhance.NativePatch]::Hash([IO.File]::ReadAllBytes($target)) -eq [VdPicoEnhance.NativePatch]::OriginalSha256) 'Uninstall did not restore exact official bytes.'
+    Assert ([VdPicoEnhance.NativePatch]::Hash([IO.File]::ReadAllBytes($target)) -eq $originalHash) 'Uninstall did not restore exact official bytes.'
     & $installer -Action Uninstall -DriverPath $target -PackagePath $PackagePath
     Write-Host 'PASS: refuse unknown external updates, exact uninstall and repeated uninstall.'
-    if ($PreviousCapsule) {
+    if ($PreviousCapsule -and $originalHash -eq [VdPicoEnhance.NativePatch]::CurrentOriginalSha256) {
+        Rejects { [VdPicoEnhance.NativePatch]::Apply($original,[IO.File]::ReadAllBytes([IO.Path]::GetFullPath($PreviousCapsule))) } 'Legacy capsule supports'
+        Write-Host 'PASS: old capsule cannot be grafted onto the new official driver.'
+    } elseif ($PreviousCapsule) {
         $savedPhase=Get-Content -LiteralPath (Join-Path $profile 'phase.txt') -Raw
         $previous = [VdPicoEnhance.NativePatch]::Apply($original,[IO.File]::ReadAllBytes([IO.Path]::GetFullPath($PreviousCapsule)))
         [IO.File]::WriteAllBytes($target,$previous)
-        $record = @{original_sha256=[VdPicoEnhance.NativePatch]::OriginalSha256; patched_sha256=[VdPicoEnhance.NativePatch]::Hash($previous); previous_sha256=[VdPicoEnhance.NativePatch]::OriginalSha256}
+        $record = @{original_sha256=$originalHash; patched_sha256=[VdPicoEnhance.NativePatch]::Hash($previous); previous_sha256=$originalHash}
         [IO.File]::WriteAllText(($target+'.vd-picoenhance.json'),($record|ConvertTo-Json))
         & $installer -Action Install -DriverPath $target -PackagePath $PackagePath
         Assert ([VdPicoEnhance.NativePatch]::Hash([IO.File]::ReadAllBytes($target)) -eq $expected) 'Upgrade differs from fresh install.'
@@ -92,8 +102,25 @@ try {
         $record = Get-Content -LiteralPath ($target+'.vd-picoenhance.json') -Raw | ConvertFrom-Json
         [IO.File]::WriteAllBytes($target,$previous) # interruption after receipt, before DLL replace
         & $installer -Action Uninstall -DriverPath $target -PackagePath $PackagePath
-        Assert ([VdPicoEnhance.NativePatch]::Hash([IO.File]::ReadAllBytes($target)) -eq [VdPicoEnhance.NativePatch]::OriginalSha256) 'Interrupted transaction did not restore.'
+        Assert ([VdPicoEnhance.NativePatch]::Hash([IO.File]::ReadAllBytes($target)) -eq $originalHash) 'Interrupted transaction did not restore.'
         Write-Host 'PASS: prior owned patch upgrade and interrupted-before-replace recovery.'
+    }
+    if ($UpgradeFromDriver) {
+        $prior = [IO.File]::ReadAllBytes([IO.Path]::GetFullPath($UpgradeFromDriver))
+        $legacyBackup = $target + '.vd-picoenhance-original'
+        Assert ([VdPicoEnhance.NativePatch]::Hash($prior) -eq [VdPicoEnhance.NativePatch]::OriginalSha256) 'Expected a legacy upgrade baseline.'
+        [IO.File]::WriteAllBytes($legacyBackup,$prior)
+        $priorPatched = [VdPicoEnhance.NativePatch]::Apply($prior,$capsule)
+        $record = @{original_sha256=[VdPicoEnhance.NativePatch]::OriginalSha256; patched_sha256=[VdPicoEnhance.NativePatch]::Hash($priorPatched); previous_sha256=[VdPicoEnhance.NativePatch]::OriginalSha256}
+        [IO.File]::WriteAllText(($target+'.vd-picoenhance.json'),($record|ConvertTo-Json))
+        # Streamer's auto-update replaces only the live DLL, leaving our old files.
+        [IO.File]::WriteAllBytes($target,$original)
+        & $installer -Action Install -DriverPath $target -PackagePath $PackagePath
+        Assert ([VdPicoEnhance.NativePatch]::Hash([IO.File]::ReadAllBytes($legacyBackup)) -eq [VdPicoEnhance.NativePatch]::OriginalSha256) 'Streamer upgrade overwrote the old backup.'
+        Assert ([VdPicoEnhance.NativePatch]::Hash([IO.File]::ReadAllBytes($backupPath)) -eq $originalHash) 'New official backup is wrong.'
+        & $installer -Action Uninstall -DriverPath $target -PackagePath $PackagePath
+        Assert ([VdPicoEnhance.NativePatch]::Hash([IO.File]::ReadAllBytes($target)) -eq $originalHash) 'Upgrade uninstall restored an old VD version.'
+        Write-Host 'PASS: Streamer update with legacy backup/receipt preserves both originals and restores the new version.'
     }
     Write-Host "All supplied PC package checks passed on PowerShell $($PSVersionTable.PSVersion)."
 } finally { $env:LOCALAPPDATA=$savedLocal; Remove-Item -LiteralPath $work -Recurse -Force }

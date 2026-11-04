@@ -43,6 +43,12 @@ class ManagedUiTests(unittest.TestCase):
         source = (ROOT / 'mod/src/VdHsMod/GestureToggle.cs').read_text(encoding='utf-8')
         self.assertNotIn('VDHS_SYSTEM_GESTURES_ENABLED', source)
 
+    def test_extension_slots_follow_stock_enum_in_old_and_new_vd(self):
+        self.run_command(self.assembly, 'extension-values')
+
+    def test_ethernet_telemetry_is_not_a_translation_target(self):
+        self.run_command(self.assembly, 'ethernet')
+
     def test_first_display_is_off_without_creating_a_setting(self):
         self.run_command(self.assembly, 'default-off')
 

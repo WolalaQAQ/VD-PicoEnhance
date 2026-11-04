@@ -230,3 +230,4 @@ Render resolution	渲染分辨率
 Target framerate	目标帧率
 Automatic bitrate	自动码率
 Spacewarp	Spacewarp
+Virtual Desktop servers unreachable	无法连接 Virtual Desktop 服务器

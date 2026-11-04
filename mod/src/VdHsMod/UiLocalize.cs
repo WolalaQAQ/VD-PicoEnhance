@@ -300,7 +300,7 @@ namespace VdHsMod
         {
             var nodes = new HashSet<object>();
             var tabs = (Array)GestureToggle.Get(panel, "_tabPanels");
-            Protect(nodes, tabs.GetValue(0), "_pnComputers", "_tbSSID", "_tbWifiInfo", "_tbAccountID",
+            Protect(nodes, tabs.GetValue(0), "_pnComputers", "_tbSSID", "_tbWifiInfo", "_tbEthernetInfo", "_tbAccountID",
                 "_tbUsbInfo", "_tbRegistryWarning", "_tbTitle", "_tbMessage");
             Protect(nodes, tabs.GetValue(2), "_gridOculusGames", "_gridSteamGames");
             Protect(nodes, tabs.GetValue(4), "_tbBitrate", "_tbBrightness", "_tbMicVolume",

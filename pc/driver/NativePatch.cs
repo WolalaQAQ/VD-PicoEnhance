@@ -9,6 +9,8 @@ using System.Text;
 namespace VdPicoEnhance {
 public static class NativePatch {
     public const string OriginalSha256 = "ad3c99c7f7346613d4c7106fb94476be5859ca17a637a11cfc156184d466f36f";
+    public const string CurrentOriginalSha256 = "9fa2b70005d4e0aea02a891ae48a5caa0314d0f30e1190001d7ea979ec10d5c1";
+    public static bool IsSupportedOriginal(string hash) { return hash == OriginalSha256 || hash == CurrentOriginalSha256; }
     public const uint CodeRva = 0xAA000;
     public const uint Delta = CodeRva - 0x1000;
     public const ulong ImageBase = 0x180000000;
@@ -62,7 +64,8 @@ public static class NativePatch {
     }
     public static Dictionary<string, uint> Exports(byte[] capsule) { return new Pe(capsule).Exports(); }
     public static byte[] Apply(byte[] original, byte[] capsule) {
-        Require(Hash(original) == OriginalSha256, "Unsupported or already modified VD driver. Original file was not changed.");
+        string originalHash = Hash(original);
+        Require(IsSupportedOriginal(originalHash), "Unsupported or already modified VD driver. Original file was not changed.");
         var old = new Pe(original); var payload = new Pe(capsule);
         Require(BitConverter.ToUInt64(original, old.Optional + 24) == ImageBase && BitConverter.ToUInt64(capsule, payload.Optional + 24) == ImageBase + Delta, "Unexpected image base.");
         Require(U32(capsule, payload.Directory(1)) == 0 && U32(capsule, payload.Optional + 16) == 0, "Capsule must not import libraries or contain DllMain.");
@@ -75,6 +78,16 @@ public static class NativePatch {
         Require(text != null && data != null && text.Rva == 0x1000, "Missing capsule code/data.");
         var symbols = payload.Exports();
         byte[] code = Slice(capsule, (int)text.Raw, (int)text.Size);
+        // Both verified builds keep the data globals and provider slot unchanged.
+        // The three called functions move in 1.34.25.
+        bool current = originalHash == CurrentOriginalSha256;
+        uint layoutRva;
+        if (symbols.TryGetValue("vd_native_image_layout", out layoutRva)) {
+            int layout = (int)(layoutRva - text.Rva);
+            Put(code, layout, current ? 0x121f0u : 0x12200u);
+            Put(code, layout + 4, current ? 0x19cf0u : 0x19d00u);
+            Put(code, layout + 8, current ? 0x19d38u : 0x19d48u);
+        } else Require(!current, "Legacy capsule supports VD 1.34.22.0 only.");
         int reserve = (int)(symbols["vd_native_runtime_table"] - text.Rva);
         for (int i = 0; i < 32768; ++i) Require(code[reserve + i] == 0, "Capsule runtime reserve is not empty.");
         var unwind = new MemoryStream();

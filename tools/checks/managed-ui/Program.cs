@@ -70,7 +70,13 @@ namespace VdHsMod
     internal static class ModLog
     {
         internal static void Info(string value) { }
+        internal static void Warn(string value) { }
+        internal static void Verbose(string value) { }
         internal static void Error(string value) { throw new Exception(value); }
+    }
+    internal static class AssemblyRedirect
+    {
+        internal static Assembly TryLoadFromPayload(string name) { return null; }
     }
 }
 public class MockGame
@@ -143,7 +149,7 @@ public class MockOverlay : MockUiSystem
         _tbGPU, _tbCodec, _tbRuntime;
 }
 public class MockInputTab { public Xenko.UI.Controls.CheckBox _chkAutoHideHands; }
-public class MockComputersTab { public Xenko.UI.UIElement _pnComputers, _tbSSID, _tbWifiInfo, _tbAccountID, _tbMessage; }
+public class MockComputersTab { public Xenko.UI.UIElement _pnComputers, _tbSSID, _tbWifiInfo, _tbEthernetInfo, _tbAccountID, _tbMessage; }
 public class MockGamesTab { public Xenko.UI.UIElement _gridOculusGames, _gridSteamGames; }
 public class MockVideosTab { public Xenko.UI.UIElement _gridFiles, _pnFolders, _tbMessage; }
 public class MockTopPanel { public Xenko.UI.UIElement _tbTime, _tbHeadsetBattery; }
@@ -151,6 +157,35 @@ public class MockBottomPanel { public Xenko.UI.UIElement _tbFrameRate, _tbVideoF
 
 public static class Program
 {
+    private enum LegacyExtensions { Last = 117 }
+    private enum CurrentExtensions { Last = 117, XR_HTC_passthrough = 118 }
+    private static void ExtensionValuesTest()
+    {
+        foreach (var type in new[] { typeof(LegacyExtensions), typeof(CurrentExtensions) })
+        {
+            int expected = type == typeof(LegacyExtensions) ? 118 : 119;
+            typeof(VdHsMod.VdReflection).GetField("_extension", PrivateStatic).SetValue(null, type);
+            Check(VdHsMod.VdReflection.ControllerExtensionValue == expected, "controller extension collides with stock enum");
+            Check(VdHsMod.VdReflection.HandTrackingExtensionValue == expected + 1, "hand extension collides");
+            var original = Enum.GetValues(type);
+            var grown = VdHsMod.ExtensionEnabler.AppendControllerExtension(original);
+            Check(grown.Length == original.Length + 1, "extension was not appended");
+            Check(Convert.ToInt32(grown.GetValue(original.Length)) == expected, "wrong appended extension");
+            for (int i = 0; i < original.Length; ++i) Check(Equals(original.GetValue(i), grown.GetValue(i)), "stock extension changed");
+            Check(ReferenceEquals(grown, VdHsMod.ExtensionEnabler.AppendControllerExtension(grown)), "extension append was not idempotent");
+        }
+        Check(CurrentExtensions.XR_HTC_passthrough.ToString() == "XR_HTC_passthrough", "HTC enum name overwritten");
+    }
+
+    private static void EthernetTest()
+    {
+        var panel = Panel();
+        var label = Label(panel._gridMain, "High");
+        panel._tabPanels[0] = new MockComputersTab { _tbEthernetInfo = label };
+        Table();
+        Check((bool)Call(Localize, "Tick"), "initializer was not ready");
+        Check(label.Text == "High" && (string)label.Font == "latin-font" && label.Listeners == 0, "Ethernet telemetry was translated");
+    }
     private const BindingFlags PrivateStatic = BindingFlags.NonPublic | BindingFlags.Static;
     private static readonly Type Toggle = typeof(VdHsMod.GestureToggle), Localize = typeof(VdHsMod.UiLocalize);
     private static object Call(Type type, string method, params object[] args) { return type.GetMethod(method, PrivateStatic).Invoke(null, args); }
@@ -700,7 +735,9 @@ public static class Program
     public static int Main(string[] args)
     {
         string s = args[0];
-        if (s == "localization") LocalizationTest();
+        if (s == "extension-values") ExtensionValuesTest();
+        else if (s == "ethernet") EthernetTest();
+        else if (s == "localization") LocalizationTest();
         else if (s == "templates") TemplateTest();
         else if (s == "table") TableTest();
         else if (s == "language") LanguageTest();

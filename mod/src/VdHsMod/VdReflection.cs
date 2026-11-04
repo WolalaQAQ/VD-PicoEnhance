@@ -20,11 +20,19 @@ namespace VdHsMod
         public const string EnumExtensionsTypeName = "System.EnumExtensions";
         public const string EnumCacheNestedName = "Cache`1";
 
-        // The two PICO extensions and their enum slots.
+        // Allocate after the stock enum: 1.34.25 uses the old slot 118 for HTC.
         public const string ControllerExtension = "XR_PICO_android_controller_function_ext_enable";
         public const string HandTrackingExtension = "XR_PICO_hand_tracking";
-        public const int ControllerExtensionValue = 118;
-        public const int HandTrackingExtensionValue = 119;
+        public static int ControllerExtensionValue { get { return NextExtensionValue(ExtensionType); } }
+        public static int HandTrackingExtensionValue { get { return ControllerExtensionValue + 1; } }
+
+        internal static int NextExtensionValue(Type enumType)
+        {
+            int maximum = -1;
+            foreach (object value in Enum.GetValues(enumType))
+                maximum = Math.Max(maximum, Convert.ToInt32(value));
+            return maximum + 1;
+        }
 
         private static Type _xr;
         private static Type _extension;

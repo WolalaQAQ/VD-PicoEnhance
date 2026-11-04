@@ -8,8 +8,8 @@
 
 基础部分需要：
 
-- 已 root 且开启 Zygisk 的 PICO 4 或 PICO 4 Pro，以及官方 Android VD 1.34.22.0；
-- 装有受支持的 VD Streamer 1.34.22.0 和 SteamVR 的 Windows PC；
+- 已 root 且开启 Zygisk 的 PICO 4 或 PICO 4 Pro，以及官方 Android VD 1.34.22.0 或 1.34.25.0（新版已在 PICO 4 Pro／PICO OS 5.13.7 上完成功能验收）；
+- 装有受支持的 VD Streamer 1.34.22.0 或 1.34.25.0 和 SteamVR 的 Windows PC；
 - PC 上的 Android platform-tools（`adb`），并在头显上授权调试和 shell 的 root 请求。
 
 PicoHand<->Knuckles 适用于 PICO 4 和 PICO 4 Pro，不依赖眼追或面捕硬件。使用时还需要 SteamVR 中的 Valve Index 指虎，以及处于同一个私有局域网（10.x、172.16–31.x 或 192.168.x 地址）且能互相访问的 PC 与头显。

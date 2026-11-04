@@ -8,8 +8,8 @@ The release bundle installs two things. The base is VD-PicoEnhance with PICO con
 
 The base needs:
 
-- a rooted PICO 4 or PICO 4 Pro with Zygisk enabled and the official Android VD 1.34.22.0;
-- a Windows PC with the supported VD Streamer 1.34.22.0 and SteamVR;
+- a rooted PICO 4 or PICO 4 Pro with Zygisk enabled and the official Android VD 1.34.22.0 or 1.34.25.0 (the newer version has passed functional checks on PICO 4 Pro / PICO OS 5.13.7);
+- a Windows PC with the supported VD Streamer 1.34.22.0 or 1.34.25.0 and SteamVR;
 - Android platform-tools (`adb`) on the PC, with debugging and the shell's root request authorized on the headset.
 
 PicoHand<->Knuckles is for both PICO 4 and PICO 4 Pro and does not require eye- or face-tracking hardware. It also needs Valve Index controllers in SteamVR and a PC and headset that can reach each other on the same private local network (10.x, 172.16–31.x or 192.168.x addresses).

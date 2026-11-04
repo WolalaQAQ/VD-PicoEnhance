@@ -9,11 +9,13 @@ Brings **PICO optical hand tracking** and **Quest-style hand passthrough** to th
 
 VD-PicoEnhance is a Magisk/Zygisk module that adds these features at runtime while keeping the official Virtual Desktop APK unchanged. Full mode also loads a gesture receiver into PICO's Shell; suppression stays off until enabled in VD. On supported firmware, a startup helper runs in `system_server` so VD can launch in hand mode.
 
-> Experimental and requires root. Tested with Virtual Desktop 1.34.22.0; a VD update may require an updated module.
+> Experimental and requires root. Tested with VD 1.34.22.0 and 1.34.25.0 on PICO 4 Pro.
 
 ## Updates
 
-Features and upgrade notes for each version are in the [changelog](CHANGELOG.md). This page describes version 1.0.10. For an older release, read the documentation under that version's tag.
+Features and upgrade notes for each version are in the [changelog](CHANGELOG.md). This page describes version 1.1.0. For another release, read the documentation under that version's tag.
+
+Versions follow MAJOR.MINOR.PATCH: incompatible changes, backward-compatible features, and fixes respectively. Prereleases use `-dev.N` or `-rc.N`.
 
 ## Features
 
@@ -47,8 +49,8 @@ The unified installer below sets up everything else by default. On a first insta
 |---|---|
 | Headset | **PICO 4 or PICO 4 Pro**, arm64-v8a; eye-gaze features require eye-tracking hardware |
 | Root | Magisk with **Zygisk enabled** (Zygisk API v5, i.e. Magisk ≥ 27000) |
-| Virtual Desktop | Android `VirtualDesktop.Android` **1.34.22.0**, unmodified |
-| PC (install and use) | Windows x64 with Virtual Desktop Streamer **1.34.22.0** and SteamVR; Android platform-tools (`adb`) for installation |
+| Virtual Desktop | Android `VirtualDesktop.Android` **1.34.22.0 / 1.34.25.0**, unmodified |
+| PC (install and use) | Windows x64 with Virtual Desktop Streamer **1.34.22.0 / 1.34.25.0** and SteamVR; Android platform-tools (`adb`) for installation |
 | PC (build only) | Windows + PowerShell, Android **NDK 26.1.10909125**, **CMake 3.22.1**, **platform 35**, **build-tools 35.0.0**, **JDK 17**, .NET SDK |
 | PicoHand<->Knuckles (optional) | Valve Index controllers in SteamVR; PICO 4 or PICO 4 Pro with firmware that meets the [headset backend's matching requirements](docs/PC-SETUP.md#before-you-install); the PC and headset on the same private local network. Root is already required by the base module |
 

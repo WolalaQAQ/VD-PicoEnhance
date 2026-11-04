@@ -2,6 +2,32 @@
 
 English | [简体中文](CHANGELOG_zh.md)
 
+## 1.1.0 — 2026-11-05
+
+### Features and fixes
+
+- Adapt to VD / Streamer 1.34.25.0 while retaining the 1.34.22.0 PC battery patch.
+- Allocate PICO extension values after the stock enum, avoiding a collision with the new HTC passthrough extension.
+- Select PC battery call targets by exact official driver identity. Keep separate originals across Streamer updates and restore the current version on uninstall.
+- Preserve dynamic Ethernet information during localization and translate the new server-unreachable message.
+- Keep the optional headset module's version and version code in sync with the base module when packaging.
+
+### Design Rationale
+
+- Start the 1.1 feature line with semantic versioning: incompatible changes increment MAJOR, backward-compatible features increment MINOR, and fixes increment PATCH. Reset lower components when incrementing a higher one; use `-dev.N` and `-rc.N` for prereleases. Published versions retain their original numbers.
+- Reuse the original OpenXR and battery transport paths without modifying the APK or changing the independent Knuckles protocol and pickup rules.
+
+### Notes & Caveats
+
+- Functionally verified on PICO 4 Pro / PICO OS 5.13.7 with SELinux Enforcing and VD 1.34.25.0: UI, system-gesture suppression, hand passthrough, gaze input, PICO controller battery, bilateral Knuckles hot switching and the SteamVR menu.
+- VD 1.34.25 makes its automatic hand-hiding timer take effect. To keep idle hands visible, turn off Automatically hide hands in VD's Input tab; this behavior is not tracking loss and needs no module patch.
+- A Streamer auto-update replaces the PC battery patch. Exit SteamVR and rerun the installer from the matching bundle afterwards.
+
+### Upgrade
+
+- Download `VD-PicoEnhance-v1.1.0.zip`, exit VD and SteamVR, and run the bundled installer. It upgrades the headset modules and PC battery patch, then reboots the headset once.
+- An existing PicoHand<->Knuckles installation is upgraded automatically, preserving pairing, settings and its enabled/disabled choice. On a first installation it remains optional with `-WithKnuckles`.
+
 ## 1.0.10 — 2026-10-25
 
 ### Fixes

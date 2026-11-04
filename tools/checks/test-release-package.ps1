@@ -47,6 +47,7 @@ try {
     $module=New-Object IO.Compression.ZipArchive -ArgumentList $memory,([IO.Compression.ZipArchiveMode]::Read)
     try {
         foreach ($name in @('mixedvr.sh','bin/vdhs-mixedvrd','bin/tracking-control.jar','payload/libvdhs.so','payload/VdHsMod.dll','module.prop')) { Assert ($null -ne $module.GetEntry($name)) "Missing headset entry: $name" }
+        $baseProps=[Text.Encoding]::UTF8.GetString((Read-Entry $module.GetEntry('module.prop')))
         foreach ($entry in $module.Entries) { Assert ($entry.FullName -notmatch '(^|/)(token|enabled|requested|baseline|pid|ready|inflight)$') 'Runtime companion state was packaged.' }
         $helperText=[Text.Encoding]::ASCII.GetString((Read-Entry $module.GetEntry('bin/vdhs-mixedvrd')))
         Assert ($helperText -notmatch '(?i)[A-Z]:[/\\]+Users[/\\]+|mixedvr-vd-driver-20261020|headset-reuse/source') 'Build-machine path leaked into headset helper.'
@@ -63,6 +64,11 @@ try {
         foreach ($name in @('module.prop','customize.sh','service.sh','standalone.sh','uninstall.sh','bin/pico-mixedvrd','bin/tracking-control.jar')) { Assert ($null -ne $optional.GetEntry($name)) "Missing optional module entry: $name" }
         $props=[Text.Encoding]::UTF8.GetString((Read-Entry $optional.GetEntry('module.prop')))
         Assert ($props -cmatch '(?m)^name=PicoHand<->Knuckles\r?$') 'Optional module display name differs.'
+        foreach ($key in @('version','versionCode')) {
+            $expected=[regex]::Match($baseProps,'(?m)^'+$key+'=([^\r\n]+)')
+            $actual=[regex]::Match($props,'(?m)^'+$key+'=([^\r\n]+)')
+            Assert ($expected.Success -and $actual.Success -and $expected.Groups[1].Value -ceq $actual.Groups[1].Value) "Optional module $key differs from base module."
+        }
         foreach ($entry in $optional.Entries) {
             Assert ($entry.FullName -notmatch '\\|^/|\.\./|(^|/)(token|network|enabled|requested|baseline|pid|ready|inflight|lease)$') 'Runtime state or unsafe path in optional module.'
         }

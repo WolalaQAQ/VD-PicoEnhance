@@ -9,11 +9,13 @@
 
 VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时提供这些功能，官方 Virtual Desktop APK 保持原样。完整模式还会向 PICO Shell 加载手势接收端，屏蔽功能由 VD 内的开关开启；在支持的固件上，启动助手运行于 `system_server`，让 VD 可以在手势模式下启动。
 
-> 实验性，需要 root。已在 Virtual Desktop 1.34.22.0 上测试；升级 VD 后可能需要更新模块。
+> 实验性，需要 root。已在 PICO 4 Pro 上验证 VD 1.34.22.0 和 1.34.25.0。
 
 ## 更新
 
-各版本的功能与升级说明见[更新日志](CHANGELOG_zh.md)。本页对应 1.0.10；安装旧版本时，请阅读该版本标签下的文档。
+各版本的功能与升级说明见[更新日志](CHANGELOG_zh.md)。本页对应 1.1.0；安装其他版本时，请阅读该版本标签下的文档。
+
+版本采用 MAJOR.MINOR.PATCH，依次表示不兼容变更、向后兼容的新功能和修复；预发布使用 `-dev.N` 或 `-rc.N`。
 
 ## 功能
 
@@ -47,8 +49,8 @@ SteamVR 里开孔的条件与 Virtual Desktop 自身的 `PassthroughPortals` 逻
 |---|---|
 | 头显 | **PICO 4 或 PICO 4 Pro**，arm64-v8a；眼动功能需要眼追硬件 |
 | Root | Magisk，且**已开启 Zygisk**（Zygisk API v5，即 Magisk ≥ 27000） |
-| Virtual Desktop | Android 版 `VirtualDesktop.Android` **1.34.22.0**，未修改 |
-| PC（安装与使用） | Windows x64，已装 Virtual Desktop Streamer **1.34.22.0** 和 SteamVR；安装时需要 Android platform-tools（`adb`） |
+| Virtual Desktop | Android 版 `VirtualDesktop.Android` **1.34.22.0 / 1.34.25.0**，未修改 |
+| PC（安装与使用） | Windows x64，已装 Virtual Desktop Streamer **1.34.22.0 / 1.34.25.0** 和 SteamVR；安装时需要 Android platform-tools（`adb`） |
 | PC（仅构建用） | Windows + PowerShell、Android **NDK 26.1.10909125**、**CMake 3.22.1**、**platform 35**、**build-tools 35.0.0**、**JDK 17**、.NET SDK |
 | PicoHand<->Knuckles（可选） | SteamVR中的Valve Index指虎；PICO 4或PICO 4 Pro，固件须满足[头显后端的匹配要求](docs/PC-SETUP_zh.md#安装前的准备)；PC与头显在同一私有局域网。root已是基础模块的要求 |
 
