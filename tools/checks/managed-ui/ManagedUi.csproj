@@ -9,7 +9,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="StreamingLimitsChecks.cs" />
     <Compile Include="../../../mod/src/VdHsMod/GestureToggle.cs" Link="GestureToggle.cs" />
+    <Compile Include="../../../mod/src/VdHsMod/StreamingLimits.cs" Link="StreamingLimits.cs" />
     <Compile Include="../../../mod/src/VdHsMod/UiLocalize.cs" Link="UiLocalize.cs" />
     <Compile Include="../../../mod/src/VdHsMod/VdReflection.cs" Link="VdReflection.cs" />
     <Compile Include="../../../mod/src/VdHsMod/ExtensionEnabler.cs" Link="ExtensionEnabler.cs" />

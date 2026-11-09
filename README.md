@@ -13,7 +13,7 @@ VD-PicoEnhance is a Magisk/Zygisk module that adds these features at runtime whi
 
 ## Updates
 
-Features and upgrade notes for each version are in the [changelog](CHANGELOG.md). This page describes version 1.1.0. For another release, read the documentation under that version's tag.
+Features and upgrade notes for each version are in the [changelog](CHANGELOG.md). For an older version, read the documentation under its tag.
 
 Versions follow MAJOR.MINOR.PATCH: incompatible changes, backward-compatible features, and fixes respectively. Prereleases use `-dev.N` or `-rc.N`.
 
@@ -32,6 +32,8 @@ Versions follow MAJOR.MINOR.PATCH: incompatible changes, backward-compatible fea
 | Hand passthrough (in SteamVR) | Sets the alpha in place on Virtual Desktop's streamed swapchain, opening a hole only where a hand is; no copy, no extra layer | `pt_hole`, `pt_follow_settings` |
 | Joint freeze gate | Reports a hand as inactive when its joints have not updated for a while, easing the "hand flashes and disappears" behaviour | `hj_freeze_ms` (default 300 ms) |
 | Eye gaze | Pointer-only One-Euro smoothing, jump confirmation and head-pose compensation, enabled by default; streaming gaze passes through | `gaze_filter`, `gaze_vd_fix` |
+| Extended bitrate range | Extend the native desktop/VR sliders to roughly three times the stock bitrate ceilings, retaining measured bandwidth limits | Automatic; current selection unchanged |
+| Extended resolution tiers | Expose VD's existing Monster, Rampage and Unstoppable quality tiers | Automatic; current selection unchanged |
 
 In SteamVR the hole follows the same conditions as Virtual Desktop's own `PassthroughPortals` logic (VR stream source, `VRPassthroughHands` enabled, hands as current input, and so on). Outside SteamVR the module does not touch any layer.
 
@@ -137,6 +139,24 @@ To upgrade, run the installer from the new bundle to install the full module, th
 No configuration file is needed for the defaults. To adjust a feature, copy the relevant entries from [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) into `/data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt` on the headset. Every key is optional; a missing key keeps its built-in default. The example lists configurable keys and suggested values.
 
 SteamVR hand-passthrough holes are enabled by default (`pt_hole=1`) and follow VD's VR hand-passthrough setting. UI gaze smoothing and head-pose compensation are enabled by default; explicit values in an existing configuration override the defaults. Restart VD after saving changes.
+
+### Bitrate and resolution unlocks
+
+Adjust VD's original bitrate and quality sliders directly; there is no extra switch. Full mode exposes the extended ranges automatically without changing the current selections or adding UI controls. Original lower bitrate values and quality tiers remain available.
+
+Bitrate extension applies to both the desktop slider in Settings and the VR slider in Streaming. VD's original calculations and settings protocol still supply the displayed and transmitted values. Measured bandwidth, Streamer's automatic bitrate and encoder limits still apply. Three times is a selectable target range, not measured throughput or a hardware rating; increase gradually while watching networking and decoding latency.
+
+To use a manually selected extended bitrate, turn off **Automatically adjust bitrate** in Virtual Desktop Streamer on the PC. The module leaves this existing switch unchanged; when enabled, automatic adjustment can still lower the actual bitrate.
+
+The performance overlay's **Max bitrate** shows the lower of the extended ceiling and measured bandwidth, rather than the stock ceiling. This is an available limit, not live throughput. The adjacent **Bitrate** value remains supplied by VD.
+
+Resolution extension uses native quality tiers without impersonating another headset or changing VDXR's render scale. On PICO 4, their per-eye reference sizes are Monster 3840×3840, Rampage 4416×4416 and Unstoppable 5184×5184. Restart VR streaming as prompted by VD to apply the selected tier. Higher tiers substantially increase GPU and decoding load; existing super-resolution and passthrough eligibility rules remain unchanged.
+
+The performance overlay's render-resolution percentage compares the PC-reported render width with the reference width of the currently active quality tier, not the physical display or encoded dimensions. The same render width produces a lower percentage at a higher tier; this number alone does not establish a resolution limit.
+
+Selections are saved in the app-private `vdhs/streaming_limits.txt` so extended values can be restored after the original tabs are constructed.
+
+To return to settings within the stock ranges, choose lower values on the original desktop/VR bitrate and quality sliders. You can also reselect them after removing the module, then restart streaming as prompted.
 
 ### Starting VD in system hand mode
 
@@ -253,6 +273,7 @@ This is an unofficial, experimental community project. It does not bundle or byp
 
 - Thanks to [misaka18848](https://github.com/misaka18848) for the PICO 4 compatibility work in [PR #1](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/1), the runtime gesture-suppression switch and Chinese localization in [PR #2](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/2), and testing the integrated changes on a PICO 4 headset.
 - [ShadowHook](https://github.com/bytedance/android-inline-hook): the inline-hook runtime.
+- [VDExtra](https://github.com/git-morin/io.github.git_morin.vdextra) and [VirtualDesktop-Unlock](https://github.com/ShadowManXR/VirtualDesktop-Unlock): references for bitrate extension; this implementation reuses VD's native sliders and settings synchronization.
 - John "topjohnwu" Wu: the Magisk / Zygisk module API.
 - `hand_mesh_fb.bin` is derived from the PICO system hand mesh and converted with the offline tooling in `tools/mesh/`.
 

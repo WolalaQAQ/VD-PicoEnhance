@@ -187,6 +187,48 @@ class ManagedUiTests(unittest.TestCase):
     def test_gesture_row_survives_panel_recreation(self):
         self.run_command(self.assembly, 'toggle-reload')
 
+    def test_streaming_unlock_defaults_leave_selections_and_disk_unchanged(self):
+        self.run_command(self.assembly, 'limits-default')
+
+    def test_streaming_unlock_invalid_saved_values_do_not_change_selection(self):
+        self.run_command(self.assembly, 'limits-invalid')
+
+    def test_streaming_unlock_extends_native_bounds_without_raising_selection(self):
+        self.run_command(self.assembly, 'limits-bounds')
+
+    def test_streaming_unlock_preserves_real_bandwidth_and_reset(self):
+        self.run_command(self.assembly, 'limits-bandwidth')
+
+    def test_streaming_unlock_recalculates_codec_specific_bounds(self):
+        self.run_command(self.assembly, 'limits-codec')
+
+    def test_streaming_unlock_allows_native_lower_selections_without_extra_controls(self):
+        self.run_command(self.assembly, 'limits-lower')
+
+    def test_streaming_unlock_batches_settings_events_and_flushes_on_disposal(self):
+        self.run_command(self.assembly, 'limits-save')
+
+    def test_streaming_unlock_restores_extended_selections_after_tab_construction(self):
+        self.run_command(self.assembly, 'limits-resume')
+
+    def test_streaming_unlock_rebinds_after_device_disposal(self):
+        self.run_command(self.assembly, 'limits-reload')
+
+    def test_overlay_maximum_uses_extended_range_without_changing_current_bitrate(self):
+        self.run_command(self.assembly, 'limits-overlay')
+
+    def test_overlay_maximum_finishes_native_updates_before_setter_returns(self):
+        self.run_command(self.assembly, 'limits-overlay-native')
+
+    def test_overlay_maximum_tracks_bandwidth_codec_foveation_and_zero_reset(self):
+        self.run_command(self.assembly, 'limits-overlay-events')
+
+    def test_overlay_maximum_listener_is_rebound_and_released_with_device(self):
+        self.run_command(self.assembly, 'limits-overlay-reload')
+
+    def test_overlay_maximum_waits_for_late_overlay_controls(self):
+        self.run_command(self.assembly, 'limits-overlay-late')
+
     def test_injector_has_no_external_gesture_setting_or_environment_gate(self):
         source = (ROOT / 'zygisk/jni/module.cpp').read_text(encoding='utf-8')
         self.assertNotIn('VDHS_SYSTEM_GESTURES_ENABLED', source)

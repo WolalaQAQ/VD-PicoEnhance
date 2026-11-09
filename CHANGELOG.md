@@ -2,6 +2,27 @@
 
 English | [简体中文](CHANGELOG_zh.md)
 
+## 1.2.0 — 2026-11-10
+
+### Features
+
+- Extend the original desktop/VR bitrate sliders to roughly 3x stock ceilings and expose VD's existing higher quality tiers directly, without extra switches. Preserve selections across UI recreation and app restarts.
+- Align the performance overlay's maximum bitrate with the extended range while retaining measured bandwidth limits and VD's adjacent bitrate data.
+
+### Design Rationale
+
+- Extend native slider bounds and reuse the original shared formulas, settings synchronization and quality tables. No additional native hooks, APK changes or Streamer helper are added.
+- Keep measured bandwidth and automatic bitrate behavior rather than advertising a fabricated speed-test result.
+- Exposing a larger selectable range does not raise the current selection, so an additional enablement switch is unnecessary.
+- Correct only the maximum-bitrate label during its original UI event, without another polling thread or changes to telemetry.
+
+### Notes & Caveats
+
+- Current selections and lower stock values remain available; full mode opens the extended ranges automatically.
+- To use a manually selected extended bitrate, disable Automatically adjust bitrate in Streamer on the PC. Measured bandwidth and encoder/decoder capability still affect actual results.
+- Restart VR streaming as prompted by VD after changing resolution. The overlay's render-resolution percentage is relative to the active quality tier, not a fixed 130% ceiling.
+- Slider ranges and the maximum-bitrate display were verified on PICO 4 Pro with VD 1.34.25.0.
+
 ## 1.1.0 — 2026-11-05
 
 ### Features and fixes

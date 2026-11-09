@@ -735,7 +735,8 @@ public static class Program
     public static int Main(string[] args)
     {
         string s = args[0];
-        if (s == "extension-values") ExtensionValuesTest();
+        if (s.StartsWith("limits-", StringComparison.Ordinal)) StreamingLimitsChecks.Run(s.Substring(7));
+        else if (s == "extension-values") ExtensionValuesTest();
         else if (s == "ethernet") EthernetTest();
         else if (s == "localization") LocalizationTest();
         else if (s == "templates") TemplateTest();

@@ -13,7 +13,7 @@ VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时提供这些功能�
 
 ## 更新
 
-各版本的功能与升级说明见[更新日志](CHANGELOG_zh.md)。本页对应 1.1.0；安装其他版本时，请阅读该版本标签下的文档。
+各版本的功能与升级说明见[更新日志](CHANGELOG_zh.md)。使用旧版本时，请阅读对应标签下的文档。
 
 版本采用 MAJOR.MINOR.PATCH，依次表示不兼容变更、向后兼容的新功能和修复；预发布使用 `-dev.N` 或 `-rc.N`。
 
@@ -32,6 +32,8 @@ VD-PicoEnhance 是一个 Magisk/Zygisk 模块，在运行时提供这些功能�
 | 手部透视（SteamVR） | 在 Virtual Desktop 串流画面的 swapchain 上原地改 alpha，只在手的位置开孔；不拷贝、不加层 | `pt_hole`、`pt_follow_settings` |
 | 冻结门控 | runtime 关节数据长时间不更新时，把这只手报告为不活跃，缓解手势"亮一下就消失" | `hj_freeze_ms`（默认 300 ms） |
 | Eye gaze | 仅对界面指针做 One-Euro 平滑、跳变确认和头部姿态补偿；串流眼动透传，两项增强默认开启 | `gaze_filter`、`gaze_vd_fix` |
+| 码率范围解锁 | 扩展原生桌面／VR 码率滑块，范围约至原码率上限的 3 倍，保留真实带宽限制 | 自动扩展原滑块，不提高当前选值 |
+| 分辨率档位解锁 | 开放 VD 已有的 Monster、Rampage、Unstoppable 画质档位 | 自动扩展原滑块，不提高当前选值 |
 
 SteamVR 里开孔的条件与 Virtual Desktop 自身的 `PassthroughPortals` 逻辑一致：串流源为 VR、`VRPassthroughHands` 打开、当前输入是手等。不在 SteamVR 时，模块不改动任何层。
 
@@ -137,6 +139,24 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1
 默认使用无需配置文件。需要调整功能时，可将 [`config/hand_gesture.example.txt`](config/hand_gesture.example.txt) 中的相应条目写入设备上的 `/data/data/VirtualDesktop.Android/vdhs/hand_gesture.txt`。每个键都是可选的，缺省时沿用内置默认值；示例列出了可配置的键与建议值。
 
 SteamVR 手部透视开孔默认开启（`pt_hole=1`），并跟随 VD 的“VR 手部透视”开关。界面眼动平滑和头部补偿默认开启；已有配置中的显式设置优先于默认值。保存配置后重启 VD 生效。
+
+### 码率与分辨率解锁
+
+直接调整 VD 原来的码率和画质滑块即可，无需额外开关。完整模式自动开放扩展范围，不改变当前选值，也不增加界面控件；仍可选择原来的低码率与低画质档位。
+
+码率扩展同时适用于设置页的桌面码率和串流页的 VR 码率。显示与传输继续使用 VD 自己的计算和设置协议；实测带宽上限、Streamer 自动码率及编码器限制仍然生效。3 倍是可选目标范围，不是实际吞吐量或硬件承诺，建议逐步提高并观察网络／解码延迟。
+
+要按手动选择的扩展码率运行，在 PC 端 Virtual Desktop Streamer 中关闭“自动调整码率”（Automatically adjust bitrate）。模块不改变这个已有开关；开启时，自动调整仍可能降低实际码率。
+
+性能面板的“最大码率”按扩展上限与实测带宽中的较小值显示，不再停在原版范围；它表示可选上限，不是实时吞吐。旁边的“码率”继续使用 VD 原有数据。
+
+扩展分辨率使用原生档位，不伪装头显型号，也不改 VDXR 的渲染比例。PICO 4 对应的每眼基准尺寸为 Monster 3840×3840、Rampage 4416×4416、Unstoppable 5184×5184。按 VD 的提示重启 VR 串流应用所选档位；高档位会明显增加 GPU 和解码负担，原来的超分辨率／透视启用条件保持不变。
+
+性能面板的“渲染分辨率”百分比是 PC 上报的渲染宽度与当前生效画质档位基准宽度之比，不是物理屏幕比例或编码尺寸。相同渲染宽度下，选择更高档位会得到更低百分比；不能仅凭这个数字判断是否受限。
+
+选择保存在应用私有目录的 `vdhs/streaming_limits.txt`，用于在原版界面构造后恢复扩展选值。
+
+若要恢复原版范围内的设置，在原来的桌面／VR 码率和画质滑块上选回较低值即可。卸载模块后也可重新选择一次，再按提示重启串流。
 
 ### 系统手势模式下启动 VD
 
@@ -253,6 +273,7 @@ python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
 
 - 感谢 [misaka18848](https://github.com/misaka18848) 为普通 PICO 4 所做的兼容工作（[PR #1](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/1)）、运行时手势屏蔽开关与中文汉化（[PR #2](https://github.com/WolalaQAQ/VD-PicoEnhance/pull/2)），以及对整合版本进行的 PICO 4 真机测试。
 - [ShadowHook](https://github.com/bytedance/android-inline-hook)：inline hook 运行时。
+- [VDExtra](https://github.com/git-morin/io.github.git_morin.vdextra) 与 [VirtualDesktop-Unlock](https://github.com/ShadowManXR/VirtualDesktop-Unlock)：码率扩展方案参考；本项目复用 VD 原生滑块和设置同步实现。
 - John "topjohnwu" Wu：Magisk / Zygisk 模块 API。
 - `hand_mesh_fb.bin` 基于 PICO 系统手部 mesh，用 `tools/mesh/` 的离线工具转换。
 

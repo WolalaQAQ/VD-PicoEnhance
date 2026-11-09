@@ -101,6 +101,7 @@ namespace VdHsMod
             {
                 Install(game);
                 val = Get(_checkBox, "IsChecked");
+                StreamingLimits.Tick(game);
             });
             if (!(val is bool)) return;
             int on = (bool)val ? 1 : 0;
@@ -286,7 +287,7 @@ namespace VdHsMod
             return f?.GetValue(null);
         }
 
-        private static Type FindType(string fullName)
+        internal static Type FindType(string fullName)
         {
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {

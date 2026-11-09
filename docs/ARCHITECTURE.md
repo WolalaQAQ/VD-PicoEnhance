@@ -378,6 +378,40 @@ Mixed fields restore their original font when returning to numbers or preserved
 names. Page recreation releases the old listeners and initializes the replacement;
 the initialization worker exits rather than scanning labels continuously.
 
+### 5.3 Streaming limits
+
+`StreamingLimits` extends VD's existing bitrate and quality sliders directly,
+without adding controls or changing current selections. It runs from
+`GestureToggle`'s existing UI dispatch, without another worker.
+Settings and bandwidth changes use the original retained event accessors;
+queued work is discarded when its UI root is disposed.
+Slider events mark preferences dirty; the existing UI tick batches disk writes,
+and disposal flushes any pending selection.
+
+The shared bitrate formula is an unclamped interpolation. Increasing the slider's
+maximum therefore lets both ends interpret the same normalized setting without
+altering the serializer or substituting another headset type. The widened maximum
+is `(3 * stockMax - stockMin) / (stockMax - stockMin)`. The displayed bandwidth
+limit uses the actual measurement in the same units, with no saturation at 1.
+The speed-test result and Streamer's automatic bitrate remain unchanged.
+
+The performance overlay's original maximum label uses
+`min(stockMax, MeasuredBandwidth)`. `StreamingLimits` changes only that label to
+`min(3 * stockMax, MeasuredBandwidth)`, preserving VD's separate bitrate value.
+A retained `TextChanged` handler corrects native rewrites synchronously on the
+UI thread; bandwidth/codec/foveation events also refresh it. The existing tick
+binds late or recreated labels without repeated text writes or idle redraws.
+Overlay replacement and device disposal remove the listener. The displayed
+maximum is a range ceiling, not measured video throughput.
+
+Resolution uses the existing `VRGraphicsQuality` enum and the headset's own
+resolution table. Saved extended selections are reapplied after VD's tab
+constructors, which otherwise clamp their widgets to the original bounds.
+`streaming_limits.txt` stores selections; a fresh installation
+does not create it merely by displaying the controls. No new native hook or PC
+helper is involved. Actual rates and resolutions depend on the PC encoder,
+network and headset decoder.
+
 ## 6. Configuration and rollback
 
 - `payload/mode.txt`: `1` = injection-only control,
