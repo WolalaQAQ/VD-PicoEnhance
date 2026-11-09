@@ -4,7 +4,10 @@ using System.IO;
 using System.Reflection;
 using Xenko.UI;
 using Xenko.UI.Controls;
+using Xenko.UI.Events;
 using VdHsMod;
+
+namespace Xenko.UI.Events { public class RoutedEventArgs : EventArgs { } }
 
 namespace Xenko.UI.Controls
 {
@@ -26,10 +29,10 @@ namespace Xenko.UI.Controls
                 float next = Math.Max(Minimum, Math.Min(Maximum, value));
                 if (next == _value) return;
                 _value = next;
-                Changed?.Invoke(this, EventArgs.Empty);
+                ValueChanged?.Invoke(this, new RoutedEventArgs());
             }
         }
-        public event EventHandler Changed;
+        public event EventHandler<RoutedEventArgs> ValueChanged;
     }
     public class LimitSlider : Slider
     {
@@ -98,6 +101,31 @@ public class LimitsStreamingTab
     public LimitSlider _sldBitrate = new LimitSlider { Value = 0.36f };
     public CheckBox _chkSuperResolution = new CheckBox { Content = new TextBlock { Font = "latin-font" } };
     public int Displayed;
+    public int QualitySounds, QualityRefreshes, RestartQualityRefreshes;
+    public string QualityLabel, LastSound;
+    public bool ThrowQualityRefresh;
+    public LimitsStreamingTab() { _sldQuality.ValueChanged += OnVRGraphicsQualityValueChanged; }
+    // Match the inspected native handler: sound is a slider-event side effect,
+    // even when assigning the selected quality does not change the setting.
+    public void OnVRGraphicsQualityValueChanged(object sender, RoutedEventArgs args)
+    {
+        var quality = (VirtualDesktop.Mobile.VRGraphicsQuality)(int)Math.Round(((Slider)sender).Value);
+        VirtualDesktop.Mobile.SharedUserSettings.Default.VRGraphicsQuality = quality;
+        if (quality == VirtualDesktop.Mobile.VRGraphicsQuality.Potato || (int)quality >= 3)
+        {
+            QualitySounds++;
+            LastSound = quality.ToString();
+        }
+        UpdateRestartQualityColor();
+    }
+    public void OnVRGraphicsQualityChanged(object sender, EventArgs args)
+    {
+        if (ThrowQualityRefresh) throw new InvalidOperationException("quality refresh fixture failure");
+        _sldQuality.Value = (int)VirtualDesktop.Mobile.SharedUserSettings.Default.VRGraphicsQuality;
+        QualityLabel = VirtualDesktop.Mobile.SharedUserSettings.Default.VRGraphicsQuality.ToString();
+        QualityRefreshes++;
+    }
+    public void UpdateRestartQualityColor() { RestartQualityRefreshes++; }
     public void UpdateVRBitrate()
     {
         Displayed = Xenko.VR.HmdResolutionTypeExtensions.Rate(_sldBitrate.Limit == 0 ? _sldBitrate.Value : Math.Min(_sldBitrate.Value, _sldBitrate.Limit), true);
@@ -138,8 +166,7 @@ internal static class StreamingLimitsChecks
         Add(panel._gridMain, desktop._sldBitrate);
         panel._tabPanels[4] = desktop;
         panel._tabPanels[5] = vr;
-        vr._sldQuality.Changed += (s, e) => User.VRGraphicsQuality = (VirtualDesktop.Mobile.VRGraphicsQuality)(int)vr._sldQuality.Value;
-        User.VRGraphicsQualityChanged += (s, e) => vr._sldQuality.Value = (int)User.VRGraphicsQuality;
+        User.VRGraphicsQualityChanged += vr.OnVRGraphicsQualityChanged;
         User.VRBitrateLimitChanged += (s, e) => vr._sldBitrate.Value = User.VRBitrateLimit;
         User.DesktopBitrateLimitChanged += (s, e) => desktop._sldBitrate.Value = User.DesktopBitrateLimit;
         return panel;
@@ -238,6 +265,11 @@ internal static class StreamingLimitsChecks
     internal static void Run(string scenario)
     {
         if (File.Exists(PathName)) File.Delete(PathName);
+        bool soundRestore = scenario.StartsWith("sound-resume-") || scenario == "sound-reload" || scenario == "sound-refresh";
+        var restoredQuality = VirtualDesktop.Mobile.VRGraphicsQuality.Rampage;
+        if (scenario.StartsWith("sound-resume-"))
+            restoredQuality = (VirtualDesktop.Mobile.VRGraphicsQuality)Enum.Parse(typeof(VirtualDesktop.Mobile.VRGraphicsQuality), scenario.Substring("sound-resume-".Length));
+        if (soundRestore) File.WriteAllText(PathName, "vr=2.5\ndesktop=2\nquality=" + (int)restoredQuality + "\n");
         if (scenario == "resume") File.WriteAllText(PathName, "bitrate=0\nresolution=0\nvr=2.5\ndesktop=2\nquality=7\n");
         if (scenario == "invalid") File.WriteAllText(PathName, "bitrate=garbage\nresolution=garbage\nvr=NaN\ndesktop=Infinity\nquality=bad\n");
         var panel = Panel();
@@ -251,6 +283,57 @@ internal static class StreamingLimitsChecks
         Near(vr._sldBitrate.Maximum, (1200000000f - 10000000) / 390000000);
         Near(desktop._sldBitrate.Maximum, (360000000f - 4000000) / 116000000);
         if (scenario.StartsWith("overlay")) { OverlayCheck(scenario, game); return; }
+        if (soundRestore)
+        {
+            Check(User.VRGraphicsQuality == restoredQuality && vr._sldQuality.Value == (int)restoredQuality,
+                "silent restore lost the saved quality");
+            Check(vr.QualitySounds == 0, "programmatic restore played " + vr.LastSound);
+            Check(vr.QualityLabel == restoredQuality.ToString() && vr.QualityRefreshes > 0 && vr.RestartQualityRefreshes > 0,
+                "silent restore skipped native dependent UI or restart state");
+            if (scenario == "sound-reload")
+            {
+                game.Disposing();
+                game.Invoke(() => game.ControlPanel = Panel());
+                Tick(game);
+                vr = (LimitsStreamingTab)((MockPanel)game.ControlPanel)._tabPanels[5];
+                Check(vr.QualitySounds == 0 && vr._sldQuality.Value == 6 && vr.QualityLabel == "Rampage",
+                    "recreated UI replayed the tier sound or lost the selected quality");
+            }
+            if (scenario == "sound-refresh")
+            {
+                Mobile.MeasuredBandwidth = 700000000;
+                Streamer.ActiveCodec = 2;
+                Mobile.FoveationChanged();
+                game.Drain();
+                for (int i = 0; i < 100; i++) Tick(game);
+                Check(vr.QualitySounds == 0 && User.VRGraphicsQuality == restoredQuality,
+                    "bandwidth/codec refresh or an idle tick replayed the tier sound");
+            }
+            // The next real slider event must still use the original handler.
+            var nextQuality = restoredQuality == VirtualDesktop.Mobile.VRGraphicsQuality.Monster ?
+                VirtualDesktop.Mobile.VRGraphicsQuality.Rampage : VirtualDesktop.Mobile.VRGraphicsQuality.Monster;
+            game.Invoke(() => vr._sldQuality.Value = (int)nextQuality);
+            Check(vr.QualitySounds == 1 && vr.LastSound == nextQuality.ToString() && User.VRGraphicsQuality == nextQuality,
+                "restore removed the native manual-change sound or settings synchronization");
+            Tick(game);
+            Check(File.ReadAllText(PathName).Contains("quality=" + (int)nextQuality), "manual quality no longer persists");
+            return;
+        }
+        if (scenario == "sound-finally")
+        {
+            vr.ThrowQualityRefresh = true;
+            bool failed = false;
+            // Force a real synchronization instead of the unchanged fast path.
+            game.Invoke(() => {
+                try { Limits.GetMethod("SetQuality", Private).Invoke(null, new object[] { 6f }); }
+                catch (TargetInvocationException) { failed = true; }
+            });
+            vr.ThrowQualityRefresh = false;
+            Check(failed, "fixture did not exercise a failed quality refresh");
+            game.Invoke(() => vr._sldQuality.Value = 5);
+            Check(vr.QualitySounds == 1 && vr.LastSound == "Monster", "failed restore did not reattach native sound handler");
+            return;
+        }
         if (scenario == "default" || scenario == "invalid")
         {
             Check(User.Writes == 0, "default install changed stock selections");

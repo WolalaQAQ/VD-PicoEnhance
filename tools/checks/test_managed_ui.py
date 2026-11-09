@@ -214,6 +214,20 @@ class ManagedUiTests(unittest.TestCase):
     def test_streaming_unlock_rebinds_after_device_disposal(self):
         self.run_command(self.assembly, 'limits-reload')
 
+    def test_restoring_saved_quality_is_silent_but_manual_changes_keep_native_sound(self):
+        for quality in ('Potato', 'Ultra', 'Godlike', 'Monster', 'Rampage', 'Unstoppable'):
+            with self.subTest(quality=quality):
+                self.run_command(self.assembly, 'limits-sound-resume-' + quality)
+
+    def test_recreated_quality_slider_restores_silently(self):
+        self.run_command(self.assembly, 'limits-sound-reload')
+
+    def test_quality_sound_is_not_replayed_by_bandwidth_codec_or_idle_refresh(self):
+        self.run_command(self.assembly, 'limits-sound-refresh')
+
+    def test_failed_quality_restore_still_reattaches_manual_sound_handler(self):
+        self.run_command(self.assembly, 'limits-sound-finally')
+
     def test_overlay_maximum_uses_extended_range_without_changing_current_bitrate(self):
         self.run_command(self.assembly, 'limits-overlay')
 

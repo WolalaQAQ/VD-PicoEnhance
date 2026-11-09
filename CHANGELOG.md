@@ -2,6 +2,17 @@
 
 English | [简体中文](CHANGELOG_zh.md)
 
+## 1.2.1 — 2026-11-10
+
+### Fixes
+- Restore saved quality tiers silently at startup and when rebuilding the UI, instead of replaying sounds such as “Rampage”.
+
+### Design Rationale
+- Keep native settings/UI updates and sounds for manual tier changes; silence only programmatic restoration.
+
+### Notes & Caveats
+- Saved bitrate/quality selections are preserved. Verified on PICO 4 Pro with VD 1.34.25.0.
+
 ## 1.2.0 — 2026-11-10
 
 ### Features

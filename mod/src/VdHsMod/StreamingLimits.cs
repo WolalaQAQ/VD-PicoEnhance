@@ -120,10 +120,7 @@ namespace VdHsMod
                 float selected = restore && _savedQuality.HasValue ? _savedQuality.Value :
                     Convert.ToSingle(Get(_user, "VRGraphicsQuality"));
                 selected = Math.Min(selected, qualityMaximum);
-                var qualityType = _user.GetType().GetProperty("VRGraphicsQuality").PropertyType;
-                if (Convert.ToSingle(Get(_user, "VRGraphicsQuality")) != selected)
-                    Set(_user, "VRGraphicsQuality", Enum.ToObject(qualityType, (int)selected));
-                Set(_qualitySlider, "Value", selected);
+                SetQuality(selected);
                 UpdateLimit(_vrSlider, true);
                 UpdateLimit(_desktopSlider, false);
                 Invoke(_streaming, "UpdateVRBitrate");
@@ -141,6 +138,32 @@ namespace VdHsMod
             float value = Math.Min(saved ?? current, Convert.ToSingle(Get(slider, "Maximum")));
             if (current != value) Set(_user, property, value);
             Set(slider, "Value", value);
+        }
+
+        private static void SetQuality(float selected)
+        {
+            float current = Convert.ToSingle(Get(_user, "VRGraphicsQuality"));
+            if (current == selected && Convert.ToSingle(Get(_qualitySlider, "Value")) == selected) return;
+            // VD's slider callback also plays the tier sound. Restoring a saved
+            // selection is not a user gesture; retain the settings-driven UI
+            // refresh, then reattach the original callback for manual changes.
+            var sliderType = _qualitySlider.GetType();
+            var add = sliderType.GetMethod("add_ValueChanged");
+            var remove = sliderType.GetMethod("remove_ValueChanged");
+            var callback = Delegate.CreateDelegate(add.GetParameters()[0].ParameterType, _streaming,
+                _streaming.GetType().GetMethod("OnVRGraphicsQualityValueChanged", Members));
+            remove.Invoke(_qualitySlider, new object[] { callback });
+            try
+            {
+                if (current != selected)
+                {
+                    var qualityType = _user.GetType().GetProperty("VRGraphicsQuality").PropertyType;
+                    Set(_user, "VRGraphicsQuality", Enum.ToObject(qualityType, (int)selected));
+                }
+                else Invoke(_streaming, "OnVRGraphicsQualityChanged", _user, EventArgs.Empty);
+                Invoke(_streaming, "UpdateRestartQualityColor");
+            }
+            finally { add.Invoke(_qualitySlider, new object[] { callback }); }
         }
 
         private static float Maximum(bool vr)
