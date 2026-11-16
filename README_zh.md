@@ -265,6 +265,16 @@ python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
 - 本仓库不打包任何 Virtual Desktop、Xenko、Mono 或 PICO 的二进制或源码，唯一的例外是 Release 整合包内的手部 mesh blob，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 - 提交 Issue 时请给出头显型号、PICO OS、Virtual Desktop 版本和脱敏后的日志片段，不要上传设备标识或签名密钥。
 
+## 社区
+
+使用求助、交流和版本更新通知，欢迎加入 Pico-Enhance 社区。
+
+<a href="https://discord.gg/ueSEydeVD8"><img src="https://img.shields.io/badge/Discord-Join%20Pico--Enhance-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="加入 Pico-Enhance Discord"></a>
+
+**QQ 群：** 1129699813，用 QQ 扫描下方二维码即可加入。
+
+<img src="assets/community/qq-group-qr.png" alt="Pico-Enhance QQ 群二维码" width="240">
+
 ## 免责声明
 
 这是非官方的实验性社区项目，不包含或绕过Virtual Desktop、PICO及其授权。Android APK保持原样；PC安装器为电量显示修改本机VD驱动并保存原备份。root注入和PC修补可能影响应用使用，请遵守所用软件的条款。"Virtual Desktop" 与 "PICO" 归各自所有方所有，此处仅用于描述互操作性。

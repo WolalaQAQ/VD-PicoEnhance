@@ -265,6 +265,16 @@ Provenance and disclaimer: [`assets/mesh/README.md`](assets/mesh/README.md).
 - This repository bundles no Virtual Desktop, Xenko, Mono or PICO binaries or sources, with the single exception of the hand mesh blob included in the release bundle; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - When opening an issue, include the headset model, PICO OS version, Virtual Desktop version and sanitized log excerpts. Do not upload device identifiers or signing keys.
 
+## Community
+
+Join the Pico-Enhance community for help, discussion and release announcements.
+
+<a href="https://discord.gg/ueSEydeVD8"><img src="https://img.shields.io/badge/Discord-Join%20Pico--Enhance-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join Pico-Enhance on Discord"></a>
+
+**QQ group:** 1129699813. Scan the code below with QQ to join.
+
+<img src="assets/community/qq-group-qr.png" alt="Pico-Enhance QQ group QR code" width="240">
+
 ## Disclaimer
 
 This is an unofficial, experimental community project. It does not bundle or bypass Virtual Desktop, PICO or their licenses. The Android APK stays unchanged; the PC installer modifies the local VD driver for battery display and preserves its original backup. Root injection and PC patching can affect application behaviour. Follow the terms of the software you use. "Virtual Desktop" and "PICO" belong to their respective owners and are used here only to describe interoperability.
