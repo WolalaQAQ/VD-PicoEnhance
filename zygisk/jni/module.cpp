@@ -124,6 +124,26 @@ static void close_staged_fds() {
     }
 }
 
+static void* open_payload_library(const char* path) {
+    void* handle = dlopen(path, RTLD_NOW | RTLD_GLOBAL);
+    if (handle) return handle;
+    // Standalone Zygisk implementations (e.g. ReZygisk) hide module libraries from
+    // the linker soinfo list, so plain dlopen() falls back to the isolated anonymous
+    // namespace and rejects app data paths. Retry through bionic's __loader_dlopen
+    // using a default-namespace caller (liblog) so the payload loads in the default
+    // linker namespace just as it does under built-in Zygisk.
+    using LoaderDlopen = void* (*)(const char*, int, const void*);
+    void* libdl = dlopen("libdl.so", RTLD_LAZY | RTLD_NOLOAD);
+    void* liblog = dlopen("liblog.so", RTLD_LAZY | RTLD_NOLOAD);
+    auto loader_dlopen = reinterpret_cast<LoaderDlopen>(
+        dlsym(libdl ? libdl : RTLD_DEFAULT, "__loader_dlopen"));
+    const void* caller = liblog ? dlsym(liblog, "__android_log_print") : nullptr;
+    if (liblog) dlclose(liblog);
+    if (libdl) dlclose(libdl);
+    if (!loader_dlopen || !caller) return nullptr;
+    return loader_dlopen(path, RTLD_NOW | RTLD_GLOBAL, caller);
+}
+
 static void stage_payload(const char* dir, JavaVM* vm) {
     if (mkdir(dir, 0700) != 0 && errno != EEXIST) {
         LOGE("mkdir %s: %s", dir, strerror(errno));
@@ -174,7 +194,7 @@ static void stage_payload(const char* dir, JavaVM* vm) {
 
     char payload[1200];
     snprintf(payload, sizeof payload, "%s/%s", dir, g_shell ? "libvdhs_shell.so" : "libvdhs.so");
-    void* handle = dlopen(payload, RTLD_NOW | RTLD_GLOBAL);
+    void* handle = open_payload_library(payload);
     if (!handle) { LOGE("dlopen %s failed: %s", payload, dlerror()); return; }
 
     typedef int (*PayloadMain)(void*, int);
@@ -281,7 +301,9 @@ public:
                 g_sources_ok = false;
                 continue;
             }
-            if (!api_->exemptFd(fd)) {
+            // USAP (nativeSpecializeAppProcess) has no fds_to_ignore and does not sanitize open FDs;
+            // standalone Zygisk implementations (ReZygisk, NeoZygisk) return false from exemptFd() there.
+            if (args->fds_to_ignore && !api_->exemptFd(fd)) {
                 LOGE("stage: exemptFd failed for %s", g_active[i].name);
                 close(fd);
                 g_sources_ok = false;

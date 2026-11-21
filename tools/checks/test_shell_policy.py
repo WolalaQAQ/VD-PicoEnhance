@@ -183,6 +183,17 @@ class ShellPolicyTests(unittest.TestCase):
         self.assertIn("vdhs_config_read(f, fallback)", payload)
         self.assertIn("return value > 0 ? value : fallback;", payload)
 
+    def test_usap_skips_exempt_fd_when_null(self):
+        source = (ROOT / "zygisk/jni/module.cpp").read_text()
+        self.assertIn("if (args->fds_to_ignore && !api_->exemptFd(fd))", source)
+
+    def test_hidden_module_falls_back_to_default_namespace_loader_dlopen(self):
+        source = (ROOT / "zygisk/jni/module.cpp").read_text()
+        self.assertIn('"__loader_dlopen"', source)
+        self.assertIn('dlopen("liblog.so", RTLD_LAZY | RTLD_NOLOAD)', source)
+        self.assertIn('dlsym(liblog, "__android_log_print")', source)
+        self.assertIn("open_payload_library(payload)", source)
+
     def test_payload_checks_full_mode(self):
         source = (ROOT / "mod/native/vdhs_shell.c").read_text()
         entry = source[source.index("int vdhs_shell_main("):]

@@ -2,6 +2,20 @@
 
 English | [简体中文](CHANGELOG_zh.md)
 
+## 1.2.2 — 2026-11-21
+
+### Fixes
+- Fix Zygisk injection failing under standalone Zygisk implementations (such as ReZygisk and NeoZygisk) when apps launch from the Android USAP pool: skip `api->exemptFd()` when `args->fds_to_ignore` is null, since USAP specialization does not sanitize open file descriptors.
+- Fix staged payload `dlopen()` failing when standalone Zygisk hides the module library from the linker `soinfo` list: fall back to bionic's `__loader_dlopen` with a default-namespace caller (`liblog.so`) so `libvdhs.so` and `libvdhs_shell.so` load in the default linker namespace.
+
+### Design Rationale
+- Keep plain `exemptFd()` and `dlopen()` unchanged on built-in Magisk Zygisk and non-USAP launches, applying the guards only when `fds_to_ignore` is null or plain `dlopen()` is blocked by the anonymous linker namespace.
+- Loading payloads in the default linker namespace preserves `dladdr()` staged paths and existing xDL symbol resolution without changing payload binaries or SELinux policy.
+
+### Notes & Caveats
+- This update changes the Zygisk injector (`arm64-v8a.so`), so reboot the headset after installing for Zygote to load the updated binary.
+- Verified on PICO 4 Pro / PICO OS 5.13.7 with SELinux Enforcing and ReZygisk v1.0.0: Shell gesture-switch payload injection (`com.picoxr.xrshell`) and VD startup capability helper both load cleanly; Virtual Desktop's payload shares the same staging and loader path.
+
 ## 1.2.1 — 2026-11-10
 
 ### Fixes

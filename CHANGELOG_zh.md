@@ -2,6 +2,20 @@
 
 [English](CHANGELOG.md) | 简体中文
 
+## 1.2.2 — 2026-11-21
+
+### 修复
+- 修复在独立 Zygisk 实现（如 ReZygisk、NeoZygisk）下，应用经 Android USAP 进程池启动时因 `args->fds_to_ignore` 为空导致 `exemptFd()` 返回失败、进而跳过注入的问题。
+- 修复独立 Zygisk 将模块库从 linker `soinfo` 列表隐藏后，直接调用 `dlopen()` 落入受限匿名命名空间而无法加载应用私有目录中 `libvdhs.so` / `libvdhs_shell.so` 的问题：常规 `dlopen()` 失败时改经 bionic `__loader_dlopen` 并借用默认命名空间中的 `liblog.so` 作为调用者加载载荷。
+
+### 设计理由
+- 在 Magisk 内置 Zygisk 和常规 fork 启动路径上保持原有 `exemptFd()` 与 `dlopen()` 行为不变，仅在 `fds_to_ignore` 为空或常规 `dlopen()` 被匿名命名空间拦截时启用兼容回退。
+- 将载荷仍加载到默认 linker 命名空间，可完整保留 `dladdr()` 路径定位和现有 xDL 符号解析逻辑，无需改动载荷本体或 SELinux 策略。
+
+### 注意事项
+- 本次更新涉及 Zygisk 注入器（`arm64-v8a.so`），安装后需要重启一次头显让 Zygote 重新加载模块。
+- 已在 PICO 4 Pro / PICO OS 5.13.7、SELinux Enforcing 与 ReZygisk v1.0.0 上验证：Shell 手势开关载荷（`com.picoxr.xrshell`）与 VD 启动能力助手均正常加载，VD 主载荷共用同一套暂存与加载路径。
+
 ## 1.2.1 — 2026-11-10
 
 ### 修复
