@@ -1,60 +1,84 @@
-# mod/ — VdHsMod and the native payload
+# `mod/` — Managed Mod (`VdHsMod`) and Native Payloads
 
-`VdHsMod` is the managed mod that installs the hand/controller hot-switch
-behaviour. It is loader-agnostic and holds **zero compile-time reference** to any
-Virtual Desktop / Xenko / Mono.Android assembly: every handle into the app is
-resolved by name through reflection.
+**English** | [简体中文](README_zh.md)
 
-```
+`mod/` contains both the native C payloads (`libvdhs.so` and `libvdhs_shell.so`) and the managed C# mod (`VdHsMod.dll`) staged into Virtual Desktop at runtime.
+
+`VdHsMod` targets `netstandard2.0` and holds **zero compile-time references** to any Virtual Desktop, Xenko, or `Mono.Android` assembly—every type, member, and event is resolved by name through reflection.
+
+## Directory Layout
+
+```text
 mod/
-  src/VdHsMod/        C# class library (netstandard2.0)
-  native/             shared native payload libvdhs.so
-    vdhs_mark.c       canonical xrMarkApiClass(0x3b) reach-through
-    vdhs_payload.c    Mono embedding loader (vdhs_payload_main)
-    vdhs_layer.c      OpenXR compatibility layer (inline hooks)
-    vdhs_hand.c       hand tracking, aim/mesh, managed extension list
-    vdhs_pt.c         zero-copy hand-passthrough hole
-    CMakeLists.txt
-  tools/bump_mvid.cs  helper to MVID-bump a redirect artifact
+├── src/VdHsMod/                  C# managed mod (netstandard2.0, offline-safe default)
+│   ├── Loader.cs                 Entry point invoked by libvdhs.so
+│   ├── Backends.cs               Backend selection (auto / redirect / dataonly / none)
+│   ├── ExtensionEnabler.cs       Managed OpenXR extension-list injection
+│   ├── GestureToggle.cs          Runtime "Suppress system gestures" checkbox + UI dispatch
+│   ├── UiLocalize.cs             Automatic Simplified Chinese UI & overlay localization
+│   ├── StreamingLimits.cs        3× bitrate & extended VR quality slider unlock
+│   ├── RedirectBackend.cs        Optional pre-patched assembly preloader
+│   ├── AssemblyRedirect.cs       Assembly resolve hook for redirect backend
+│   ├── PayloadConfig.cs          Reads backend.txt / VDHS_BACKEND
+│   ├── VdReflection.cs           Reflection helpers
+│   ├── NativeBridge.cs           Managed-to-native glue
+│   └── VdHsMod.csproj
+├── native/                       Native C11 payloads (built with Android NDK + CMake/Ninja)
+│   ├── vdhs_payload.c            Mono embedding loader (vdhs_payload_main)
+│   ├── vdhs_layer.c              OpenXR loader inline hooks (ShadowHook)
+│   ├── vdhs_hand.c               Hand tracking, FB aim/mesh, joint freeze gate, Mono helpers
+│   ├── vdhs_pt.c                 Zero-copy SteamVR hand-passthrough alpha hole
+│   ├── vdhs_mark.c               xrMarkApiClass(0x3b) runtime reach-through
+│   ├── vdhs_battery.c            Controller battery OpenXR action & sampling
+│   ├── vdhs_caps.c               Runtime eye-gaze / face capability gating
+│   ├── vdhs_sym.c                Thin xDL mapped-symbol resolver (shared by both .so libs)
+│   ├── vdhs_shell.c              PICO Shell gesture-suppression receiver (libvdhs_shell.so)
+│   ├── third_party/shadowhook-2.0.1/  Vendored ShadowHook 2.0.1 + xDL
+│   └── CMakeLists.txt
+└── tools/
+    └── bump_mvid.cs              Helper to bump the MVID of a local redirect artifact
 ```
 
-## Build
+## Building
 
 ```powershell
-# managed mod: offline-safe default (redirect + dataonly backends, no NuGet)
+# Build only the managed mod (offline-safe default: no NuGet restore)
 dotnet build mod/src/VdHsMod/VdHsMod.csproj -c Release
 
-# native payload + Zygisk module, staged into zygisk/payload/
+# Build VdHsMod.dll, libvdhs.so, libvdhs_shell.so, coldstart helper, and Zygisk injector
 pwsh -File zygisk/build.ps1
+
+# Build and pack zygisk/dist/vdhs_zygisk.zip
+pwsh -File zygisk/build.ps1 -Pack
 ```
 
-The full module is assembled by `zygisk/build.ps1`, which stages `libvdhs.so`,
-`VdHsMod.dll` and the bundled hand mesh into `zygisk/payload/`.
+`zygisk/build.ps1` compiles all components with `-Wall -Wextra` (zero warnings expected) and stages `libvdhs.so`, `libvdhs_shell.so`, `VdHsMod.dll`, and the bundled `hand_mesh_fb.bin` into `zygisk/payload/`. Additional flags:
 
-## Backends (runtime switch, no rebuild)
+- `-Clean`: Wipe CMake build directories before configuring.
+- `-Harmony`: Opt-in legacy Harmony backend build (`-p:VdHsHarmony=true`, restores `Lib.Harmony 2.3.5` from NuGet and stages `0Harmony.dll`).
+- `-RedirectArtifact <path>`: Stage a locally built `Xenko.OpenXR.patched.dll` into `zygisk/payload/`.
 
-Set `VDHS_BACKEND` or edit `zygisk/payload/backend.txt`:
+## Managed Backends
 
-| backend | what it does | state |
+Switch backends at runtime without rebuilding by editing `zygisk/payload/backend.txt` (or setting the `VDHS_BACKEND` environment variable) and restarting Virtual Desktop:
+
+| Backend | Behavior | Notes |
 |---|---|---|
-| `auto` | redirect artifact if staged, else dataonly | default |
-| `redirect` | preload a pre-patched `Xenko.OpenXR.patched.dll` with a bumped MVID, so it survives the official APK's AOT images | experimental; needs a patched DLL you produce yourself |
-| `dataonly` | reflection-only data injection (enables the PICO extension, cannot change `IsControllerActive`) | safe fallback |
-| `none` | injection smoke test only | — |
+| `auto` | Uses `redirect` if `Xenko.OpenXR.patched.dll` is staged, else `harmony` if built and staged, else `dataonly` | Default |
+| `redirect` | Preloads a locally built, MVID-bumped `Xenko.OpenXR.patched.dll` so Mono JITs it instead of using the APK's AOT image | Experimental; user-built |
+| `dataonly` | Reflection-only extension injection without modifying `IsControllerActive` | Default fallback |
+| `none` | Skips backend changes; native OpenXR layer and managed UI features still run in full mode | Not an injection smoke test—use `payload/mode.txt = 1` + reboot for a control run |
 
-## Redirect artifact
+## Building a Local Redirect Artifact (Optional)
 
-The `redirect` backend loads an assembly you produced for your own device; it is
-an optional, experimental route and is not required for the shipped Zygisk
-compatibility layer. Its only build helper here is the MVID bump:
+The `redirect` backend is an optional, experimental route not required by the shipped Zygisk compatibility layer. To convert a locally patched `Xenko.OpenXR.dll` into a redirect artifact whose MVID no longer matches the APK's AOT image:
 
 ```powershell
-# turn a locally patched Xenko.OpenXR.dll into a redirect artifact
+# Bump the MVID so Mono JITs the replacement assembly
 dotnet run mod/tools/bump_mvid.cs -- <patched.dll> mod/redirect/Xenko.OpenXR.patched.dll
 
-# stage it
-pwsh -File zygisk/build.ps1 -Redirect mod/redirect/Xenko.OpenXR.patched.dll
+# Stage it into the module tree
+pwsh -File zygisk/build.ps1 -RedirectArtifact mod/redirect/Xenko.OpenXR.patched.dll
 ```
 
-Bumping the MVID makes the official AOT image no longer match, so Mono JITs the
-assembly instead. `mod/redirect/` is a build-output directory and is not tracked.
+`mod/redirect/` is gitignored build output.

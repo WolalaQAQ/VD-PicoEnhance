@@ -1,61 +1,58 @@
-# Hand mesh blob (`hand_mesh_fb.bin`)
+# Hand Mesh Blob (`hand_mesh_fb.bin`)
 
-`hand_mesh_fb.bin` is the hand mesh the compatibility layer serves for
-`XR_FB_hand_tracking_mesh`. Without it the module does not enable Virtual
-Desktop's hand-mesh feature.
+**English** | [简体中文](README_zh.md)
 
-## What it is
+`hand_mesh_fb.bin` supplies the hand geometry that VD-PicoEnhance serves through `XR_FB_hand_tracking_mesh` (`xrGetHandMeshFB`). Without a valid file at runtime, Virtual Desktop's hand-mesh feature is left disabled.
 
-A small, self-describing binary ("VDHM" container) holding, for each hand:
+## Format
 
-- 26 OpenXR joint bind poses, radii and parent indices,
-- the vertex positions / normals / UVs and the index buffer of the hand mesh,
-  converted from the headset mesh into OpenXR joint order and output space.
+A self-describing little-endian binary (`VDHM` container, version `1`, CRC32-checked, 16-byte aligned arrays) storing left and right hand data ready for direct copy into OpenXR `XrHandTrackingMeshFB` buffers:
 
-The full layout is documented at the top of `tools/mesh/xrshell_mesh.py`.
+- 26 OpenXR joint bind poses, radii, and parent indices (`XrHandJointEXT` order)
+- Vertex positions, normals, UVs, skinning blend indices/weights, and triangle indices transformed into OpenXR/FB coordinate and winding conventions
 
-## Where it comes from
+The complete binary layout is documented at the top of [`tools/mesh/xrshell_mesh.py`](../../tools/mesh/xrshell_mesh.py).
 
-It is **converted from the headset's own PICO system resource**, not authored by
-this project:
+## Provenance & Integrity
 
-1. Source: `assets/mesh/HAND_{L,R}_OpenXR.MESH/` inside
-   `/system/priv-app/XRShell/XRShell.apk` (the PICO `XRShell` system app).
-2. Conversion: `tools/mesh/xrshell_mesh.py blob`, run offline on the host. No
-   PICO library is linked at build or run time.
+This file is **converted from the headset's own PICO system resource**, not authored by this project:
 
-The blob is therefore a **derivative of a PICO system asset**. It is included
-here only so that the interoperability feature (showing the hand model inside
-Virtual Desktop) works out of the box.
+1. **Source**: `assets/mesh/HAND_{L,R}_OpenXR.MESH/` inside `/system/priv-app/XRShell/XRShell.apk` (PICO's `XRShell` system app).
+2. **Conversion**: Generated offline on a host PC via `tools/mesh/xrshell_mesh.py blob`. No PICO library is linked at build time or runtime.
 
-## Integrity
-
-```
+```text
 sha256  bc63e23093b8184b510219e78dbe2b67939e87362eab092c634edf2f6e6fca27
 size    187200 bytes
 ```
 
-Releases publish the same blob and list this hash in `SHA256SUMS.txt`.
+Releases publish this exact blob and record its checksum in `SHA256SUMS.txt`.
 
-## How to use it
+## Installation & Replacement
 
-The blob must sit next to the staged `libvdhs.so`, in the app's private
-directory:
+At runtime, the compatibility layer reads the mesh from Virtual Desktop's private directory:
 
-```
+```text
 /data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin
 ```
 
-The module installs the bundled mesh on app launch if missing; the one-shot
-installer also places it when missing. Existing meshes are preserved. To replace
-one manually, close Virtual Desktop and run on the PC:
+Both the Zygisk module (on first launch) and `install-vd-picoenhance.ps1` copy the bundled mesh automatically if missing, while preserving any existing file.
+
+### Replace via Installer
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-vd-picoenhance.ps1 -MeshPath .\hand_mesh_fb.bin
+```
+
+### Replace Manually via ADB
+
+Close Virtual Desktop, push the file from your PC, and set ownership and SELinux labels as root:
 
 ```sh
 adb push hand_mesh_fb.bin /data/local/tmp/
 adb shell
 ```
 
-In the device shell, enter `su` to obtain root, then run:
+Inside the headset shell, elevate with `su` and run:
 
 ```sh
 set -e
@@ -72,24 +69,18 @@ exit
 exit
 ```
 
-The directory must belong to the app so the injector can write its payload on
-the next launch. Restart Virtual Desktop afterwards. Without a usable mesh file,
-the module does not enable VD's hand-mesh feature.
+The `vdhs` directory must remain owned by the app UID so the injector can stage payloads on subsequent launches. Restart Virtual Desktop afterward.
 
-To generate a blob from your own headset's XRShell APK, install Python and numpy,
-then run on the PC:
+### Generate from Your Own Headset
+
+Install Python 3 with `numpy`, pull `/system/priv-app/XRShell/XRShell.apk` from your headset, and run:
 
 ```sh
 python tools/mesh/xrshell_mesh.py blob --apk /path/to/XRShell.apk --out out
 ```
 
-Install `out/hand_mesh_fb.bin` using the steps above.
+Install `out/hand_mesh_fb.bin` using either method above.
 
-## Disclaimer
+## Redistribution Disclaimer
 
-`XRShell.apk` and its mesh are the property of PICO. This file is redistributed
-solely to make an interoperability feature of an unmodified third-party
-application work, with no affiliation with or endorsement by PICO, and it will
-be removed on request. If you prefer not to use it, replace it with a copy
-generated from your device using `tools/mesh/xrshell_mesh.py`. To run without a
-mesh, remove both the module's `payload/hand_mesh_fb.bin` and the staged copy.
+`XRShell.apk` and its hand mesh are the property of PICO. This converted blob is included solely so the hand-mesh interoperability feature of an unmodified third-party application works out of the box, with no affiliation with or endorsement by PICO, and will be removed upon request. You may replace it with a copy generated from your own device using `tools/mesh/xrshell_mesh.py`, or run without a hand mesh by removing both `/data/adb/modules/vdhs_zygisk/payload/hand_mesh_fb.bin` and `/data/data/VirtualDesktop.Android/vdhs/hand_mesh_fb.bin`.
